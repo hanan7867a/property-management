@@ -30,7 +30,6 @@ export function useAuth() {
         setLoading(false);
         return;
       }
-      setLoading(true);
       const { data: profile, error } = await supabase
         .from("profiles")
         .select("role, full_name, is_active")
