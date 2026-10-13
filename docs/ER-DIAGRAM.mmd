@@ -1,0 +1,373 @@
+erDiagram
+    %% ============ ACCESS (who can log in, who owns what) ============
+    AUTH_USERS ||--|| PROFILES : "1 login = 1 profile"
+    PROFILES |o--o| OWNERS : "an owner may have a login"
+    OWNERS ||--o{ OWNER_ACCOUNTS : "saved recipient accounts"
+    PROFILES ||--o{ PLAZA_STAFF : "accountant assigned to"
+    PLAZAS ||--o{ PLAZA_STAFF : "has accountants"
+
+    %% ============ PROPERTY ============
+    PLAZAS ||--o{ UNITS : "contains"
+    UNITS ||--o{ UNIT_PHOTOS : "has photos"
+    PLAZAS ||--o{ UNIT_PHOTOS : "scope"
+
+    %% ============ OWNERSHIP (versioned history) ============
+    PLAZAS ||--o{ PLAZA_OWNERSHIP_VERSIONS : "ownership history"
+    PLAZA_OWNERSHIP_VERSIONS ||--|{ PLAZA_OWNERSHIP_MEMBERS : "partners in a version"
+    OWNERS ||--o{ PLAZA_OWNERSHIP_MEMBERS : "holds a share"
+
+    %% ============ TENANTS AND AGREEMENTS ============
+    UNITS ||--o{ TENANCIES : "stays (history)"
+    TENANTS ||--o{ TENANCIES : "rents"
+    PLAZAS ||--o{ TENANCIES : "scope"
+    TENANCIES ||--o{ RENT_INCREASES : "planned increases"
+
+    %% ============ RENT ============
+    TENANCIES ||--o{ RENT_ENTRIES : "one per month"
+    UNITS ||--o{ RENT_ENTRIES : "for unit"
+    PLAZAS ||--o{ RENT_ENTRIES : "scope"
+    RENT_ENTRIES ||--o{ RENT_PAYMENTS : "paid by"
+    PLAZAS ||--o{ RENT_PAYMENTS : "scope"
+    TENANCIES ||--o{ REMINDERS : "reminded"
+    RENT_ENTRIES |o--o{ REMINDERS : "about"
+    PLAZAS ||--o{ REMINDERS : "scope"
+
+    %% ============ EXPENSES ============
+    EXPENSE_CATEGORIES ||--o{ EXPENSES : "classifies"
+    PLAZAS ||--o{ EXPENSES : "spent on"
+    UNITS |o--o{ EXPENSES : "optional unit"
+    OWNERS |o--o{ EXPENSES : "charged to one partner"
+    PLAZAS ||--o{ RECURRING_EXPENSE_TEMPLATES : "monthly templates"
+    EXPENSE_CATEGORIES ||--o{ RECURRING_EXPENSE_TEMPLATES : "classifies"
+
+    %% ============ ACCOUNTANT PAY ============
+    PROFILES ||--o{ ACCOUNTANT_TERMS : "pay rule"
+    PLAZAS ||--o{ ACCOUNTANT_TERMS : "per plaza"
+    PLAZAS ||--o{ ACCOUNTANT_PAY_ENTRIES : "monthly pay"
+    PROFILES |o--o{ ACCOUNTANT_PAY_ENTRIES : "paid to"
+
+    %% ============ MONTH CLOSE AND OWNER MONEY ============
+    PLAZAS ||--o{ MONTH_CLOSURES : "open / closed"
+    PLAZAS ||--o{ MONTHLY_DISTRIBUTIONS : "frozen shares"
+    OWNERS ||--o{ MONTHLY_DISTRIBUTIONS : "share of"
+    PLAZAS ||--o{ OWNER_PAYMENTS : "money sent from"
+    OWNERS ||--o{ OWNER_PAYMENTS : "money sent to"
+
+    %% ============ DOCUMENTS, ALERTS, AUDIT ============
+    PLAZAS ||--o{ DOCUMENTS : "papers"
+    UNITS |o--o{ DOCUMENTS : "optional"
+    TENANTS |o--o{ DOCUMENTS : "optional"
+    TENANCIES |o--o{ DOCUMENTS : "optional"
+    PROFILES ||--o{ NOTIFICATIONS : "receives"
+    PROFILES |o--o{ ACTIVITY_LOG : "did (soft link)"
+    PLAZAS |o--o{ ACTIVITY_LOG : "about (soft link)"
+
+    AUTH_USERS {
+        uuid id PK
+        text email UK
+    }
+
+    PROFILES {
+        uuid id PK, FK
+        text full_name
+        text phone
+        user_role role "accountant | owner"
+        text language "en | ur"
+        boolean is_active
+        jsonb notification_prefs
+    }
+
+    OWNERS {
+        uuid id PK
+        uuid profile_id FK, UK "nullable"
+        text full_name
+        text cnic
+        text bank_name
+        text account_number
+        text iban
+        boolean is_lead "lead owner = business head"
+        boolean is_active
+    }
+
+    OWNER_ACCOUNTS {
+        uuid id PK
+        uuid owner_id FK
+        text bank_name
+        text account_title
+        text account_number
+        text iban
+        boolean is_default
+        boolean is_active
+    }
+
+    PLAZAS {
+        uuid id PK
+        text name
+        text address
+        text city
+        int floors
+        text photo_path "private Storage path"
+        boolean is_active
+        uuid created_by FK
+    }
+
+    PLAZA_STAFF {
+        uuid plaza_id PK, FK
+        uuid profile_id PK, FK
+    }
+
+    PLAZA_OWNERSHIP_VERSIONS {
+        uuid id PK
+        uuid plaza_id FK
+        ownership_type ownership_type "single | shared | rotation"
+        date effective_from "first day of month"
+        date rotation_start_month
+        text reason
+        uuid created_by FK
+    }
+
+    PLAZA_OWNERSHIP_MEMBERS {
+        uuid id PK
+        uuid version_id FK
+        uuid owner_id FK
+        numeric share_percent "must total 100"
+        int rotation_order "1..n"
+    }
+
+    UNITS {
+        uuid id PK
+        uuid plaza_id FK
+        text unit_number UK "unique per plaza"
+        unit_type unit_type "flat | shop | office | other"
+        text type_name "custom display label for other"
+        int floor
+        numeric size_sqft
+        bigint monthly_rent
+        unit_status status "occupied | vacant"
+        date vacant_since
+        boolean is_active
+    }
+
+    UNIT_PHOTOS {
+        uuid id PK
+        uuid unit_id FK
+        uuid plaza_id FK
+        text file_path
+    }
+
+    TENANTS {
+        uuid id PK
+        text full_name
+        text phone
+        text whatsapp
+        text cnic
+        text cnic_front_path
+        text cnic_back_path
+    }
+
+    TENANCIES {
+        uuid id PK
+        uuid unit_id FK
+        uuid tenant_id FK
+        uuid plaza_id FK
+        bigint monthly_rent
+        bigint advance_amount
+        int tenancy_period_months "optional explicit term"
+        date start_date
+        date end_date
+        date notice_given_on
+        tenancy_status status "active | ended"
+        date vacated_on
+        bigint advance_returned
+    }
+
+    RENT_INCREASES {
+        uuid id PK
+        uuid tenancy_id FK
+        uuid plaza_id FK
+        date effective_month
+        bigint new_rent
+    }
+
+    RENT_ENTRIES {
+        uuid id PK
+        uuid tenancy_id FK
+        uuid unit_id FK
+        uuid plaza_id FK
+        date month UK "unique per tenancy and month"
+        bigint due_amount
+        bigint carried_forward "nonnegative opening balance"
+        date due_date
+        bigint paid_amount "kept by trigger"
+        rent_status status "pending | partial | paid"
+    }
+
+    RENT_PAYMENTS {
+        uuid id PK
+        uuid rent_entry_id FK
+        uuid plaza_id FK
+        bigint amount
+        date paid_on
+        payment_method method
+        text reference
+        text received_by
+        text receipt_path
+        text receipt_number UK
+        record_status status "active | cancelled"
+        text cancelled_reason
+        uuid created_by FK
+    }
+
+    REMINDERS {
+        uuid id PK
+        uuid tenancy_id FK
+        uuid rent_entry_id FK
+        uuid plaza_id FK
+        reminder_channel channel "whatsapp | sms"
+        text message
+        uuid created_by FK
+    }
+
+    EXPENSE_CATEGORIES {
+        int id PK
+        text name UK
+        text name_ur
+        text icon
+        text color
+    }
+
+    EXPENSES {
+        uuid id PK
+        uuid plaza_id FK
+        uuid unit_id FK
+        int category_id FK
+        bigint amount
+        date expense_date
+        text bill_path "optional private Storage path"
+        expense_payment_status payment_status "paid | unpaid"
+        expense_funding_source paid_from "rent | outside"
+        text paid_by
+        payment_method paid_via "includes other"
+        expense_charge charge_type "plaza | partner"
+        uuid charged_owner_id FK
+        expense_status status "approved | pending_approval | rejected | cancelled"
+        uuid approved_by FK
+        text rejection_reason
+        text cancelled_reason
+        uuid created_by FK
+    }
+
+    RECURRING_EXPENSE_TEMPLATES {
+        uuid id PK
+        uuid plaza_id FK
+        int category_id FK
+        bigint amount
+        int day_of_month
+        boolean is_active
+    }
+
+    ACCOUNTANT_TERMS {
+        uuid id PK
+        uuid profile_id FK
+        uuid plaza_id FK
+        pay_basis basis "fixed | percentage"
+        numeric value
+        date effective_from
+    }
+
+    ACCOUNTANT_PAY_ENTRIES {
+        uuid id PK
+        uuid plaza_id FK
+        date month UK
+        uuid profile_id FK
+        bigint collected_basis
+        bigint amount
+    }
+
+    MONTH_CLOSURES {
+        uuid id PK
+        uuid plaza_id FK
+        date month UK "unique per plaza and month"
+        month_status status "open | closed"
+        text statement_ref UK
+        uuid closed_by FK
+        text reopen_reason
+    }
+
+    MONTHLY_DISTRIBUTIONS {
+        uuid id PK
+        uuid plaza_id FK
+        date month UK
+        uuid owner_id FK
+        bigint gross_share
+        bigint partner_expenses
+        bigint amount_due
+        jsonb snapshot
+    }
+
+    OWNER_PAYMENTS {
+        uuid id PK
+        uuid plaza_id FK
+        date month
+        uuid owner_id FK
+        bigint amount
+        bigint expected_amount "stored by trigger"
+        date sent_on
+        payment_method method "cash | bank_transfer | cheque | other"
+        text sent_by
+        text sending_bank_name
+        text sending_account_number "sensitive; masked in UI"
+        uuid recipient_account_id FK "nullable saved account"
+        text recipient_bank_name "payment-time snapshot"
+        text recipient_account_number "payment-time snapshot; masked in UI"
+        text transaction_id
+        text receipt_path "optional private proof path"
+        text statement_number UK
+        owner_payment_status status "sent | confirmed | disputed | cancelled"
+        uuid confirmed_by FK
+        text dispute_reason
+        text difference_reason
+    }
+
+    DOCUMENTS {
+        uuid id PK
+        uuid plaza_id FK
+        uuid unit_id FK
+        uuid tenant_id FK
+        uuid tenancy_id FK
+        document_type doc_type
+        text title
+        text file_path
+        date expiry_date
+    }
+
+    NOTIFICATIONS {
+        uuid id PK
+        uuid user_id FK
+        uuid plaza_id FK "nullable scope"
+        text type
+        text title
+        text link
+        boolean is_read
+    }
+
+    ACTIVITY_LOG {
+        bigint id PK
+        uuid actor_id "soft link"
+        text action
+        text table_name
+        text record_id
+        uuid plaza_id "soft link"
+        jsonb before_data
+        jsonb after_data
+        text reason
+    }
+
+    APP_SETTINGS {
+        boolean id PK "single row"
+        bigint approval_limit
+        int rent_due_day
+        int agreement_alert_days
+        text reminder_template_en
+        text reminder_template_ur
+    }

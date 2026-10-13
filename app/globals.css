@@ -1,26 +1,112 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-bg: #f5f7fb;
+  --color-surface: #ffffff;
+  --color-ink: #0b1b3a;
+  --color-text: #1f2a44;
+  --color-muted: #6b7694;
+  --color-border: #e3e8f2;
+  --color-primary: #4f46e5;
+  --color-primary-soft: #eef0ff;
+  --color-accent: #f5b544;
+  --shadow-soft: 0 1px 2px rgba(11, 27, 58, 0.04), 0 8px 24px rgba(11, 27, 58, 0.06);
+  --font-sans: var(--font-inter), sans-serif;
+  --font-urdu-heading: var(--font-nastaliq), serif;
+  --font-urdu-body: var(--font-naskh), serif;
+}
+
+.dark {
+  --color-bg: #0e1424;
+  --color-surface: #151c30;
+  --color-ink: #f8fbff;
+  --color-text: #d9e2f1;
+  --color-muted: #98a6bf;
+  --color-border: #293348;
+  --color-primary: #818cf8;
+  --color-primary-soft: #20284a;
+  --color-accent: #f7c564;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-ink: var(--color-ink);
+  --color-text: var(--color-text);
+  --color-muted: var(--color-muted);
+  --color-border: var(--color-border);
+  --color-primary: var(--color-primary);
+  --color-primary-soft: var(--color-primary-soft);
+  --color-accent: var(--color-accent);
+  --shadow-soft: var(--shadow-soft);
+  --font-sans: var(--font-sans);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-bg);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  min-height: 44px;
+}
+
+[dir="rtl"] {
+  font-family: var(--font-urdu-body);
+}
+
+[dir="rtl"] h1,
+[dir="rtl"] h2,
+[dir="rtl"] h3 {
+  font-family: var(--font-urdu-heading);
+  line-height: 1.8;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  aside,
+  nav,
+  header,
+  button {
+    display: none !important;
+  }
+
+  body {
+    background: white;
+  }
 }
