@@ -38,6 +38,7 @@ export type OwnerArrears = {
   unitNumber: string;
   total_arrears: number;
   months_unpaid: number;
+  unpaid_months: string[];
   max_days_overdue: number;
 };
 
@@ -346,15 +347,17 @@ export function createOwnerRepositories(ownerId: string) {
             unitNumber: unit?.number ?? "—",
             total_arrears: 0,
             months_unpaid: 0,
+            unpaid_months: [],
             max_days_overdue: 0,
           };
           prior.total_arrears += balance;
           prior.months_unpaid += 1;
+          prior.unpaid_months.push(entry.month);
           const days = Math.max(0, Math.floor((Date.now() - Date.parse(`${entry.month}-01T00:00:00Z`)) / 86400000));
           prior.max_days_overdue = Math.max(prior.max_days_overdue, days);
           byTenant.set(entry.tenantId, prior);
         }
-        return Array.from(byTenant.values()).sort((a, b) => b.total_arrears - a.total_arrears);
+        return Array.from(byTenant.values()).map((row) => ({ ...row, unpaid_months: [...row.unpaid_months].sort() })).sort((a, b) => b.total_arrears - a.total_arrears);
       },
     },
     notificationRepo: {
