@@ -10,7 +10,7 @@ import type {
   Tenant,
   Unit,
 } from "@/lib/types";
-import { emptySnapshot, loadRemoteState, saveRemoteState, type TableRows } from "@/lib/supabase-state";
+import { emptySnapshot, loadTables, saveRemoteState, type LoadScope, type TableName, type TableRows } from "@/lib/supabase-state";
 
 const storageKey = "kiraya-hisab-state-changed";
 
@@ -62,17 +62,49 @@ function enqueueSave(): Promise<void> {
   return result;
 }
 
-/** Loads the state from Supabase. The database starts empty until data is entered from the app. */
-export async function hydrateSharedDemoState(): Promise<SharedDemoState> {
-  const remote = await loadRemoteState();
-  if (remote) {
-    cache = remote.state;
-    saved = remote.saved;
-  } else {
-    cache = emptySharedDemoState;
-    saved = emptySnapshot();
-  }
+let loaded = new Set<TableName>();
+
+/** Starts an empty session. Nothing is downloaded here; each screen asks for the tables it needs. */
+export function startSharedDemoSession(): void {
+  cache = emptySharedDemoState;
+  saved = emptySnapshot();
+  loaded = new Set();
   hydrated = true;
+}
+
+export function loadedSharedTables(): TableName[] {
+  return Array.from(loaded);
+}
+
+export function mergeById<T extends { id: string }>(incoming: T[], current: T[]): T[] {
+  const ids = new Set(current.map((item) => item.id));
+  return [...incoming.filter((item) => !ids.has(item.id)), ...current];
+}
+
+/** Loads the tables that are not loaded yet and merges them into the in-memory state (local rows win). */
+export async function loadSharedTables(names: TableName[], scope?: LoadScope): Promise<SharedDemoState> {
+  if (!hydrated) throw new Error("The app data session has not started yet.");
+  const pending = names.filter((name) => !loaded.has(name));
+  if (!pending.length) return cache;
+  const result = await loadTables(pending, scope);
+  const wants = (name: TableName) => pending.includes(name);
+  const incoming = result.state;
+  cache = {
+    owners: wants("owners") ? mergeById(incoming.owners, cache.owners) : cache.owners,
+    plazas: wants("plazas") ? mergeById(incoming.plazas, cache.plazas) : cache.plazas,
+    units: wants("units") ? mergeById(incoming.units, cache.units) : cache.units,
+    tenants: wants("tenants") ? mergeById(incoming.tenants, cache.tenants) : cache.tenants,
+    rentEntries: wants("rent_entries") ? mergeById(incoming.rentEntries, cache.rentEntries) : cache.rentEntries,
+    expenses: wants("expenses") ? mergeById(incoming.expenses, cache.expenses) : cache.expenses,
+    ownerPayments: wants("owner_payments") ? mergeById(incoming.ownerPayments, cache.ownerPayments) : cache.ownerPayments,
+    documents: wants("documents") ? mergeById(incoming.documents, cache.documents) : cache.documents,
+    notifications: wants("notifications") ? mergeById(incoming.notifications, cache.notifications) : cache.notifications,
+    activityLog: wants("activity_log") ? mergeById(incoming.activityLog, cache.activityLog) : cache.activityLog,
+  };
+  for (const [table, rows] of Object.entries(result.saved)) {
+    saved[table] = new Map([...rows, ...(saved[table] ?? [])]);
+  }
+  for (const name of pending) loaded.add(name);
   return cache;
 }
 

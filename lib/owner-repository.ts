@@ -1,6 +1,6 @@
 import { appSettings } from "@/lib/settings";
 import { ownerCanConfirmPayment, ownerCanReviewExpense, ownerCanViewPayment, ownerCanViewPlaza } from "@/lib/permissions";
-import { readSharedDemoState, writeSharedDemoState, type SharedDemoState } from "@/lib/shared-demo-store";
+import { loadSharedTables, readSharedDemoState, writeSharedDemoState, type SharedDemoState } from "@/lib/shared-demo-store";
 import type { ActivityLogEntry, AppNotification, Expense, OwnerPayment, Plaza, RentEntry, Unit } from "@/lib/types";
 
 export type OwnerDistribution = {
@@ -115,6 +115,16 @@ function appendOwnerEvent(
     ownerId,
     plazaId,
   }, ...state.notifications];
+}
+
+/** Loads only this owner's plazas and the records that belong to them. Already loaded tables are skipped. */
+export async function loadOwnerData(ownerId: string): Promise<void> {
+  await loadSharedTables(["owners", "plazas"]);
+  const plazaIds = readSharedDemoState().plazas.filter((plaza) => ownerCanViewPlaza(plaza, ownerId)).map((plaza) => plaza.id);
+  await loadSharedTables(["units", "rent_entries", "expenses", "owner_payments", "documents", "notifications", "activity_log"], { plazaIds, ownerId });
+  const plazaIdSet = new Set(plazaIds);
+  const unitIds = readSharedDemoState().units.filter((unit) => plazaIdSet.has(unit.plazaId)).map((unit) => unit.id);
+  await loadSharedTables(["tenants"], { unitIds });
 }
 
 export function createOwnerRepositories(ownerId: string) {

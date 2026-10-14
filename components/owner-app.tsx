@@ -30,7 +30,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { createOwnerRepositories, type OwnerArrears, type OwnerDistribution, type OwnerRentStatus, type PlazaMonthSummary } from "@/lib/owner-repository";
+import { createOwnerRepositories, loadOwnerData, type OwnerArrears, type OwnerDistribution, type OwnerRentStatus, type PlazaMonthSummary } from "@/lib/owner-repository";
 import { ownerEn, ownerUr } from "@/lib/i18n/owner";
 import { appSettings } from "@/lib/settings";
 import { readSharedDemoState, sharedDemoStorageKey, type SharedDemoState } from "@/lib/shared-demo-store";
@@ -147,6 +147,7 @@ export function OwnerApp({
   const refresh = useCallback(async () => {
     setError("");
     try {
+      await loadOwnerData(ownerId);
       const state = readSharedDemoState();
       const myOwnerRecord = state.owners.find((item) => item.id === ownerId);
       if (!myOwnerRecord) throw new Error("Your owner record could not be found.");

@@ -32,8 +32,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { calculatePlazaMonth, distributeNet, getRotationOwner, lostRent } from "@/lib/accounting";
-import { activityLog, demoMonth, documents, expenses, notifications, ownerPayments, plazas, rentEntries, tenants, units, users } from "@/lib/mock-data";
+import { distributeNet, getRotationOwner, lostRent } from "@/lib/accounting";
+import { demoMonth, users } from "@/lib/mock-data";
 import { createReceiptPdf } from "@/lib/receipt-pdf";
 import { appSettings } from "@/lib/settings";
 import { dictionaries, type SupportedLanguage } from "@/lib/i18n";
@@ -41,7 +41,8 @@ import { daysBetween, formatMoney, monthLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ActivityLogEntry, AppNotification, Document, Expense, ExpenseCategory, Owner, OwnerPayment, OwnershipConfig, Payment, PaymentMethod, Plaza, RentEntry, Tenant, Unit, User } from "@/lib/types";
 import { OwnerApp } from "@/components/owner-app";
-import { hydrateSharedDemoState, writeSharedDemoState } from "@/lib/shared-demo-store";
+import { loadedSharedTables, loadSharedTables, mergeById, readSharedDemoState, startSharedDemoSession, writeSharedDemoState } from "@/lib/shared-demo-store";
+import type { TableName } from "@/lib/supabase-state";
 import { isViewableFile, migrateInlineFiles, saveFile } from "@/lib/storage";
 import { StoredFileLink, StoredImage } from "@/components/stored-file";
 import { useAuth } from "@/lib/hooks/useAuth";
@@ -63,6 +64,28 @@ type SectionId =
   | "activity"
   | "notifications"
   | "settings";
+
+const baseTables: TableName[] = ["owners", "plazas", "units"];
+const rentTables: TableName[] = [...baseTables, "tenants", "rent_entries"];
+const sectionTables: Record<SectionId, TableName[]> = {
+  dashboard: [...baseTables, "rent_entries", "expenses", "owner_payments"],
+  properties: [...rentTables, "documents"],
+  tenants: [...rentTables, "documents"],
+  rent: [...rentTables, "expenses", "owner_payments"],
+  summary: [...rentTables, "expenses", "owner_payments"],
+  arrears: rentTables,
+  vacancy: [...rentTables, "documents"],
+  expenses: [...baseTables, "expenses"],
+  "owner-payments": [...rentTables, "expenses", "owner_payments"],
+  documents: [...baseTables, "documents"],
+  activity: [...baseTables, "activity_log"],
+  notifications: [...baseTables, "notifications"],
+  calculator: [...baseTables, "rent_entries", "expenses", "owner_payments"],
+  reports: [...baseTables, "rent_entries", "expenses", "owner_payments"],
+  settings: baseTables,
+};
+
+const ownerLoginTables: TableName[] = ["owners"];
 
 const groups: { title: keyof typeof dictionaries.en; items: { id: SectionId; label: keyof typeof dictionaries.en; icon: typeof Home }[] }[] = [
   { title: "overview", items: [{ id: "dashboard", label: "dashboard", icon: Home }] },
@@ -271,13 +294,12 @@ function TenantDetailPanel({
 }
 
 
-function Dashboard({ t, plazaList, unitList, expenseList, ownerPaymentList }: { t: typeof dictionaries.en; plazaList: Plaza[]; unitList: Unit[]; expenseList: Expense[]; ownerPaymentList: OwnerPayment[] }) {
-  const plazaA = calculatePlazaMonth("plaza-a", demoMonth);
-  const addedRentExpenses = newlyDeductibleExpenses(expenseList, "plaza-a", demoMonth);
-  const currentMonthEntries = rentEntries.filter((entry) => entry.month === demoMonth);
+function Dashboard({ t, plazaList, unitList, rentEntryList, expenseList, ownerPaymentList }: { t: typeof dictionaries.en; plazaList: Plaza[]; unitList: Unit[]; rentEntryList: RentEntry[]; expenseList: Expense[]; ownerPaymentList: OwnerPayment[] }) {
+  const currentMonthEntries = rentEntryList.filter((entry) => entry.month === demoMonth);
   const recordedPaidExpenses = expenseList.filter((expense) => expense.date.startsWith(demoMonth) && expenseIsPaid(expense) === "paid").reduce((sum, expense) => sum + expense.amount, 0);
   const expected = currentMonthEntries.filter((entry) => entry.status !== "vacant").reduce((sum, entry) => sum + entry.dueAmount + entry.carriedForward, 0);
   const collected = currentMonthEntries.reduce((sum, entry) => sum + entry.payments.reduce((inner, payment) => inner + (payment.status === "active" ? payment.amount : 0), 0), 0);
+  const netProfit = collected - recordedPaidExpenses;
   const progress = expected > 0 ? Math.min(100, Math.round((collected / expected) * 100)) : 0;
   const overdueCount = currentMonthEntries.filter((entry) => entry.status === "overdue").length;
   return (
@@ -297,21 +319,23 @@ function Dashboard({ t, plazaList, unitList, expenseList, ownerPaymentList }: { 
           <div className="rounded-2xl bg-white/10 p-4">
             <p className="text-sm text-white/70">{t.summary}</p>
             <p className="mt-2 text-4xl font-semibold tabular-nums">{progress}%</p>
-            <p className="mt-2 text-sm text-white/70">Al-Noor Plaza example net: {formatMoney(plazaA.net - addedRentExpenses)}</p>
+            <p className="mt-2 text-sm text-white/70">{t.netProfit}: {formatMoney(netProfit)}</p>
           </div>
         </CardContent>
       </Card>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard label={t.totalCollected} value={formatMoney(collected)} chip="+12%" />
         <StatCard label={t.totalExpenses} value={formatMoney(recordedPaidExpenses)} />
-        <StatCard label={t.netProfit} value={formatMoney(plazaA.net - addedRentExpenses)} />
+        <StatCard label={t.netProfit} value={formatMoney(netProfit)} />
         <StatCard label={t.vacantUnits} value={String(unitList.filter((unit) => unit.status === "vacant").length)} chip="red chip" />
         <StatCard label={t.overdueTenants} value={String(overdueCount)} />
         <StatCard label={t.pendingConfirmations} value={String(ownerPaymentList.filter((payment) => payment.status === "sent-awaiting-confirmation").length)} />
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
         {plazaList.map((plaza) => {
-          const calc = calculatePlazaMonth(plaza.id, demoMonth);
+          const plazaCollected = currentMonthEntries.filter((entry) => entry.plazaId === plaza.id).reduce((sum, entry) => sum + entry.payments.reduce((inner, payment) => inner + (payment.status === "active" ? payment.amount : 0), 0), 0);
+          const plazaPendingExpenses = expenseList.filter((expense) => expense.plazaId === plaza.id && expense.date.startsWith(demoMonth) && expense.status === "pending-approval").reduce((sum, expense) => sum + expense.amount, 0);
+          const calc = { collected: plazaCollected, pendingExpenses: plazaPendingExpenses };
           const plazaUnits = unitList.filter((unit) => unit.plazaId === plaza.id);
           return <Card key={plaza.id}><CardContent className="p-4"><div className="h-24 rounded-2xl" style={{ background: plaza.photoSeed }} /><div className="mt-4 flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink">{plaza.name}</h3><p className="text-sm text-muted">{plaza.address}</p></div><Badge className="border-primary/20 bg-primary-soft text-primary">{plaza.ownership.type}</Badge></div><div className="mt-4 h-2 rounded-full bg-bg"><div className="h-2 rounded-full bg-primary" style={{ width: `${Math.min(100, Math.round((calc.collected / Math.max(calc.collected + 1, calc.collected + calc.pendingExpenses)) * 100))}%` }} /></div><div className="mt-4 grid grid-cols-2 gap-2 text-sm"><span>{formatMoney(calc.collected)}</span><span>{plazaUnits.filter((unit) => unit.status === "vacant").length} vacant</span></div></CardContent></Card>;
         })}
@@ -1441,18 +1465,6 @@ function expenseWasPaidFromRent(expense: Expense) {
   return expense.paidFrom ?? (expense.status === "approved" ? "rent" : "outside");
 }
 
-function newlyDeductibleExpenses(expenseList: Expense[], plazaId: string, month: string) {
-  return expenseList
-    .filter((expense) =>
-      expense.plazaId === plazaId &&
-      expense.date.startsWith(month) &&
-      expenseIsPaid(expense) === "paid" &&
-      expenseWasPaidFromRent(expense) === "rent" &&
-      !expenses.some((original) => original.id === expense.id)
-    )
-    .reduce((sum, expense) => sum + expense.amount, 0);
-}
-
 function ExpenseForm({
   plazaList,
   onClose,
@@ -2206,6 +2218,7 @@ export function AccountantApp() {
   const [readyUserId, setReadyUserId] = useState<string | null>(null);
   const sharedDataReady = Boolean(userId) && readyUserId === userId;
   const [sharedDataError, setSharedDataError] = useState("");
+  const [loadedTables, setLoadedTables] = useState<TableName[]>([]);
   const [language, setLanguage] = useState<SupportedLanguage>("en");
   const [section, setSection] = useState<SectionId>("dashboard");
   const [searchTerm, setSearchTerm] = useState("");
@@ -2213,59 +2226,91 @@ export function AccountantApp() {
   const [dark, setDark] = useState(false);
   const [quick, setQuick] = useState(false);
   const [ownerList, setOwnerList] = useState<Owner[]>([]);
-  const [plazaList, setPlazaList] = useState<Plaza[]>(plazas);
-  const [tenantList, setTenantList] = useState<Tenant[]>(tenants);
-  const [unitList, setUnitList] = useState<Unit[]>(units);
-  const [rentEntryList, setRentEntryList] = useState<RentEntry[]>(rentEntries);
-  const [expenseList, setExpenseList] = useState<Expense[]>(expenses);
-  const [ownerPaymentList, setOwnerPaymentList] = useState<OwnerPayment[]>(ownerPayments);
-  const [rentSheetKeys, setRentSheetKeys] = useState<string[]>(() => Array.from(new Set(rentEntries.map((entry) => `${entry.plazaId}:${entry.month}`))));
-  const [documentList, setDocumentList] = useState<Document[]>(documents);
-  const [notificationList, setNotificationList] = useState<AppNotification[]>(notifications);
-  const [activityList, setActivityList] = useState<ActivityLogEntry[]>(activityLog);
+  const [plazaList, setPlazaList] = useState<Plaza[]>([]);
+  const [tenantList, setTenantList] = useState<Tenant[]>([]);
+  const [unitList, setUnitList] = useState<Unit[]>([]);
+  const [rentEntryList, setRentEntryList] = useState<RentEntry[]>([]);
+  const [expenseList, setExpenseList] = useState<Expense[]>([]);
+  const [ownerPaymentList, setOwnerPaymentList] = useState<OwnerPayment[]>([]);
+  const [rentSheetKeys, setRentSheetKeys] = useState<string[]>([]);
+  const [documentList, setDocumentList] = useState<Document[]>([]);
+  const [notificationList, setNotificationList] = useState<AppNotification[]>([]);
+  const [activityList, setActivityList] = useState<ActivityLogEntry[]>([]);
+  if (userId && readyUserId !== userId) {
+    setReadyUserId(userId);
+    setOwnerList([]);
+    setPlazaList([]);
+    setTenantList([]);
+    setUnitList([]);
+    setRentEntryList([]);
+    setExpenseList([]);
+    setOwnerPaymentList([]);
+    setRentSheetKeys([]);
+    setDocumentList([]);
+    setNotificationList([]);
+    setActivityList([]);
+    setLoadedTables([]);
+    setSharedDataError("");
+  }
   const t = dictionaries[language];
   const reduceMotion = useReducedMotion();
   useEffect(() => {
     if (!userId) return;
-    const load = async () => {
-      try {
-        setSharedDataError("");
-        const state = await hydrateSharedDemoState();
-        setOwnerList(state.owners);
-        setPlazaList(state.plazas);
-        setTenantList(state.tenants);
-        setUnitList(state.units);
-        setRentEntryList(state.rentEntries);
-        setExpenseList(state.expenses);
-        setOwnerPaymentList(state.ownerPayments);
-        setDocumentList(state.documents);
-        setNotificationList(state.notifications);
-        setActivityList(state.activityLog);
-        setReadyUserId(userId);
-        if (role === "accountant" || role === "admin") {
-          void migrateInlineFiles(state).then((replacements) => {
-            if (!replacements.size) return;
-            const swap = (value: string) => replacements.get(value) ?? value;
-            const swapOptional = (value?: string) => (value === undefined ? value : swap(value));
-            setTenantList((current) => current.map((tenant) => ({ ...tenant, cnicFrontUrl: swapOptional(tenant.cnicFrontUrl), cnicBackUrl: swapOptional(tenant.cnicBackUrl), agreementUrl: swapOptional(tenant.agreementUrl) })));
-            setDocumentList((current) => current.map((document) => ({ ...document, url: swap(document.url) })));
-            setExpenseList((current) => current.map((expense) => ({ ...expense, billUrl: swap(expense.billUrl) })));
-            setOwnerPaymentList((current) => current.map((payment) => ({ ...payment, paymentProofUrl: swapOptional(payment.paymentProofUrl), receiptUrl: swapOptional(payment.receiptUrl) })));
-          });
-        }
-      } catch (cause) {
-        setSharedDataError(cause instanceof Error ? cause.message : "Data could not be loaded from Supabase.");
-      }
-    };
-    void load();
+    startSharedDemoSession();
     const onStorageError = (event: Event) => setSharedDataError((event as CustomEvent<string>).detail);
     window.addEventListener("kiraya-demo-storage-error", onStorageError);
     return () => {
       window.removeEventListener("kiraya-demo-storage-error", onStorageError);
     };
-  }, [userId, role]);
+  }, [userId]);
+  const sectionReady = (role === "owner" ? ownerLoginTables : sectionTables[section]).every((table) => loadedTables.includes(table));
   useEffect(() => {
-    if (!sharedDataReady) return;
+    if (!sharedDataReady || !role) return;
+    let cancelled = false;
+    const requiredTables = role === "owner" ? ownerLoginTables : sectionTables[section];
+    const load = async () => {
+      try {
+        const state = await loadSharedTables(requiredTables);
+        if (cancelled) return;
+        const has = (table: TableName) => requiredTables.includes(table);
+        if (has("owners")) setOwnerList((current) => mergeById(state.owners, current));
+        if (has("plazas")) setPlazaList((current) => mergeById(state.plazas, current));
+        if (has("units")) setUnitList((current) => mergeById(state.units, current));
+        if (has("tenants")) setTenantList((current) => mergeById(state.tenants, current));
+        if (has("rent_entries")) {
+          setRentEntryList((current) => mergeById(state.rentEntries, current));
+          setRentSheetKeys((current) => Array.from(new Set([...current, ...state.rentEntries.map((entry) => `${entry.plazaId}:${entry.month}`)])));
+        }
+        if (has("expenses")) setExpenseList((current) => mergeById(state.expenses, current));
+        if (has("owner_payments")) setOwnerPaymentList((current) => mergeById(state.ownerPayments, current));
+        if (has("documents")) setDocumentList((current) => mergeById(state.documents, current));
+        if (has("notifications")) setNotificationList((current) => mergeById(state.notifications, current));
+        if (has("activity_log")) setActivityList((current) => mergeById(state.activityLog, current));
+        setLoadedTables(loadedSharedTables());
+      } catch (cause) {
+        if (!cancelled) setSharedDataError(cause instanceof Error ? cause.message : "Data could not be loaded from Supabase.");
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [sharedDataReady, role, section]);
+  const loadedKey = loadedTables.join(",");
+  useEffect(() => {
+    if (!sharedDataReady || (role !== "accountant" && role !== "admin")) return;
+    void migrateInlineFiles(readSharedDemoState()).then((replacements) => {
+      if (!replacements.size) return;
+      const swap = (value: string) => replacements.get(value) ?? value;
+      const swapOptional = (value?: string) => (value === undefined ? value : swap(value));
+      setTenantList((current) => current.map((tenant) => ({ ...tenant, cnicFrontUrl: swapOptional(tenant.cnicFrontUrl), cnicBackUrl: swapOptional(tenant.cnicBackUrl), agreementUrl: swapOptional(tenant.agreementUrl) })));
+      setDocumentList((current) => current.map((document) => ({ ...document, url: swap(document.url) })));
+      setExpenseList((current) => current.map((expense) => ({ ...expense, billUrl: swap(expense.billUrl) })));
+      setOwnerPaymentList((current) => current.map((payment) => ({ ...payment, paymentProofUrl: swapOptional(payment.paymentProofUrl), receiptUrl: swapOptional(payment.receiptUrl) })));
+    });
+  }, [sharedDataReady, role, loadedKey]);
+  useEffect(() => {
+    if (!sharedDataReady || role === "owner" || !role) return;
     try {
       writeSharedDemoState({
         owners: ownerList,
@@ -2283,7 +2328,7 @@ export function AccountantApp() {
       const message = cause instanceof Error ? cause.message : "Demo data could not be saved.";
       window.dispatchEvent(new CustomEvent("kiraya-demo-storage-error", { detail: message }));
     }
-  }, [sharedDataReady, ownerList, plazaList, tenantList, unitList, rentEntryList, expenseList, ownerPaymentList, documentList, notificationList, activityList]);
+  }, [sharedDataReady, role, ownerList, plazaList, tenantList, unitList, rentEntryList, expenseList, ownerPaymentList, documentList, notificationList, activityList]);
   const addOwner = useCallback((values: { name: string; phone: string; bank: string }) => {
     const id = `owner-${Date.now()}`;
     setOwnerList((current) => [...current, { id, name: values.name, phone: values.phone, bank: values.bank }]);
@@ -2509,7 +2554,8 @@ export function AccountantApp() {
       : unit));
   }, [tenantList]);
   const body = useMemo(() => {
-    if (section === "dashboard") return <Dashboard t={t} plazaList={plazaList} unitList={unitList} expenseList={expenseList} ownerPaymentList={ownerPaymentList} />;
+    if (!sectionReady) return <Card><CardContent className="p-6 text-center text-sm text-muted">{sharedDataError ? "This screen could not be loaded. Open it again to retry." : "Loading…"}</CardContent></Card>;
+    if (section === "dashboard") return <Dashboard t={t} plazaList={plazaList} unitList={unitList} rentEntryList={rentEntryList} expenseList={expenseList} ownerPaymentList={ownerPaymentList} />;
     if (section === "properties") return <Properties t={t} plazaList={plazaList} tenantList={tenantList} unitList={unitList} rentEntryList={rentEntryList} documentList={documentList} ownerList={ownerList} onAddOwner={addOwner} onSavePlaza={savePlaza} onUpdatePlaza={updatePlaza} onCreateRentSheet={openPlazaRentSheet} />;
     if (section === "tenants") return <Tenants t={t} searchTerm={searchTerm} plazaList={plazaList} tenantList={tenantList} unitList={unitList} rentEntryList={rentEntryList} documentList={documentList} onSaveTenant={saveTenant} onUpdateTenant={updateTenant} onVacateTenant={vacateTenant} />;
     if (section === "rent") return <Rent t={t} plazaList={plazaList} tenantList={tenantList} unitList={unitList} rentEntryList={rentEntryList} expenseList={expenseList} ownerPaymentList={ownerPaymentList} ownerList={ownerList} rentSheetKeys={rentSheetKeys} initialPlazaId={rentInitialPlazaId} onRentSheetKeysChange={setRentSheetKeys} onRentEntriesChange={setRentEntryList} onRecordPayment={recordPayment} />;
@@ -2519,7 +2565,7 @@ export function AccountantApp() {
     if (section === "summary") return <Rent statementOnly t={t} plazaList={plazaList} tenantList={tenantList} unitList={unitList} rentEntryList={rentEntryList} expenseList={expenseList} ownerPaymentList={ownerPaymentList} ownerList={ownerList} rentSheetKeys={rentSheetKeys} initialPlazaId={rentInitialPlazaId} onRentSheetKeysChange={setRentSheetKeys} onRentEntriesChange={setRentEntryList} onRecordPayment={recordPayment} />;
     if (section === "owner-payments") return <OwnerPayments t={t} plazaList={plazaList} ownerPaymentList={ownerPaymentList} ownerList={ownerList} userList={users} tenantList={tenantList} unitList={unitList} rentEntryList={rentEntryList} expenseList={expenseList} onSave={saveOwnerPayment} />;
     return <SupportScreens id={section} t={t} documentList={documentList} activityEntries={activityList} notificationEntries={notificationList} ownerList={ownerList} />;
-  }, [section, t, searchTerm, ownerList, plazaList, tenantList, unitList, rentEntryList, expenseList, ownerPaymentList, rentSheetKeys, rentInitialPlazaId, documentList, activityList, notificationList, savePlaza, addOwner, updatePlaza, openPlazaRentSheet, saveTenant, updateTenant, saveExpense, saveOwnerPayment, vacateTenant, recordPayment]);
+  }, [section, sectionReady, sharedDataError, t, searchTerm, ownerList, plazaList, tenantList, unitList, rentEntryList, expenseList, ownerPaymentList, rentSheetKeys, rentInitialPlazaId, documentList, activityList, notificationList, savePlaza, addOwner, updatePlaza, openPlazaRentSheet, saveTenant, updateTenant, saveExpense, saveOwnerPayment, vacateTenant, recordPayment]);
 
   if (loading) {
     return (
@@ -2568,6 +2614,9 @@ export function AccountantApp() {
   }
 
   if (role === "owner") {
+    if (!sectionReady && !sharedDataError) {
+      return <main className="grid min-h-dvh place-items-center bg-bg p-4 text-text"><p className="text-sm text-muted">Loading data...</p></main>;
+    }
     if (!ownerId || !ownerList.some((owner) => owner.id === ownerId)) {
       return (
         <main className="grid min-h-dvh place-items-center bg-bg p-4 text-text">

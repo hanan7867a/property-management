@@ -166,25 +166,67 @@ function snapshot(rows: Record<Table, Row[]>): TableRows {
 const PAGE = 1000;
 const CHUNK = 400;
 
-async function fetchAll(table: Table): Promise<Raw[]> {
+export type TableName = Table;
+export type LoadScope = { plazaIds?: string[]; unitIds?: string[]; ownerId?: string };
+
+const IN_CHUNK = 100;
+const plazaScoped: Table[] = ["units", "rent_entries", "expenses", "owner_payments", "activity_log"];
+const plazaOrGlobal: Table[] = ["documents", "notifications"];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type QueryBuilder = any;
+
+async function fetchPaged(table: Table, apply: (query: QueryBuilder) => QueryBuilder = (query) => query): Promise<Raw[]> {
   const supabase = createClient();
   const all: Raw[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase.from(table).select("*").order("id").range(from, from + PAGE - 1);
+    const { data, error } = await apply(supabase.from(table).select("*")).order("id").range(from, from + PAGE - 1);
     if (error) throw new Error(`Could not read ${table} from Supabase: ${error.message}`);
     all.push(...(data ?? []));
     if (!data || data.length < PAGE) return all;
   }
 }
 
-/** Loads the whole app state. Returns null when the database has no data yet. */
-export async function loadRemoteState(): Promise<{ state: AppState; saved: TableRows } | null> {
-  const entries = await Promise.all(tables.map(async (table) => [table, await fetchAll(table)] as const));
-  const data = Object.fromEntries(entries) as Record<Table, Raw[]>;
-  if (tables.every((table) => data[table].length === 0)) return null;
+async function fetchInChunks(table: Table, column: string, ids: string[]): Promise<Raw[]> {
+  const rows: Raw[] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const chunk = ids.slice(i, i + IN_CHUNK);
+    rows.push(...(await fetchPaged(table, (query) => query.in(column, chunk))));
+  }
+  return rows;
+}
+
+async function fetchTable(table: Table, scope?: LoadScope): Promise<Raw[]> {
+  const plazaIds = scope?.plazaIds;
+  if (plazaIds && plazaScoped.includes(table)) {
+    const rows = await fetchInChunks(table, "plaza_id", plazaIds);
+    return table === "owner_payments" && scope?.ownerId ? rows.filter((row) => row.owner_id === scope.ownerId) : rows;
+  }
+  if (plazaIds && plazaOrGlobal.includes(table)) {
+    const rows = await fetchInChunks(table, "plaza_id", plazaIds);
+    const global = await fetchPaged(table, (query) => query.is("plaza_id", null));
+    return [...rows, ...global];
+  }
+  if (table === "tenants" && scope?.unitIds) return fetchInChunks("tenants", "unit_id", scope.unitIds);
+  return fetchPaged(table);
+}
+
+/** Loads only the requested tables (rent entries always bring their payments). Returns the mapped rows and their saved snapshot. */
+export async function loadTables(names: Table[], scope?: LoadScope): Promise<{ state: AppState; saved: TableRows }> {
+  const wanted = new Set<Table>(names);
+  if (wanted.has("rent_entries")) wanted.add("payments");
+  const data = Object.fromEntries(tables.map((table) => [table, [] as Raw[]])) as Record<Table, Raw[]>;
+  await Promise.all([...wanted].filter((table) => table !== "payments").map(async (table) => {
+    data[table] = await fetchTable(table, scope);
+  }));
+  if (wanted.has("payments")) {
+    data.payments = scope?.plazaIds ? await fetchInChunks("payments", "rent_entry_id", data.rent_entries.map((row) => row.id)) : await fetchPaged("payments");
+  }
   const state = fromRows(data);
-  // Snapshot from the mapped-back state so that later diffs compare like with like.
-  return { state, saved: snapshot(toRows(state)) };
+  const full = snapshot(toRows(state));
+  const saved: TableRows = {};
+  for (const table of wanted) saved[table] = full[table];
+  return { state, saved };
 }
 
 /** Writes only what changed since `saved`. Returns the new snapshot. */
