@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import Image from "next/image";
 import {
   Bell,
   Building2,
@@ -43,6 +42,8 @@ import { cn } from "@/lib/utils";
 import type { ActivityLogEntry, AppNotification, Document, Expense, ExpenseCategory, Owner, OwnerPayment, OwnershipConfig, Payment, PaymentMethod, Plaza, RentEntry, Tenant, Unit, User } from "@/lib/types";
 import { OwnerApp } from "@/components/owner-app";
 import { hydrateSharedDemoState, writeSharedDemoState } from "@/lib/shared-demo-store";
+import { isViewableFile, migrateInlineFiles, saveFile } from "@/lib/storage";
+import { StoredFileLink, StoredImage } from "@/components/stored-file";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { Login } from "@/components/login";
 
@@ -238,7 +239,7 @@ function TenantDetailPanel({
               <Card key={label}>
                 <CardContent className="p-3">
                   <p className="mb-2 text-sm font-medium text-ink">{label}</p>
-                  <Image src={url} alt={label} width={480} height={300} unoptimized className="h-36 w-full rounded-xl object-cover" />
+                  <StoredImage value={url} alt={label} className="h-36 w-full rounded-xl object-cover" />
                 </CardContent>
               </Card>
             ) : null)}
@@ -849,9 +850,9 @@ function TenantForm({
       onSave({
         name,
         cnic,
-        cnicFrontUrl: front instanceof File && front.size ? await readFileData(front) : initialTenant?.cnicFrontUrl ?? "",
-        cnicBackUrl: back instanceof File && back.size ? await readFileData(back) : initialTenant?.cnicBackUrl ?? "",
-        agreementUrl: agreement instanceof File && agreement.size ? await readFileData(agreement) : initialTenant?.agreementUrl,
+        cnicFrontUrl: front instanceof File && front.size ? await saveFile(front, "cnic") : initialTenant?.cnicFrontUrl ?? "",
+        cnicBackUrl: back instanceof File && back.size ? await saveFile(back, "cnic") : initialTenant?.cnicBackUrl ?? "",
+        agreementUrl: agreement instanceof File && agreement.size ? await saveFile(agreement, "agreements") : initialTenant?.agreementUrl,
         phone,
         unitId: selectedUnit.id,
         rent: Number(data.get("rent")),
@@ -1499,7 +1500,7 @@ function ExpenseForm({
         amount,
         date: String(data.get("date")),
         description,
-        billUrl: attachment instanceof File && attachment.size ? await readFileData(attachment) : "",
+        billUrl: attachment instanceof File && attachment.size ? await saveFile(attachment, "bills") : "",
         paymentStatus,
         paymentMethod: paymentStatus === "paid" ? paymentMethod : undefined,
         paidBy: paymentStatus === "paid" ? paidBy : "",
@@ -1584,8 +1585,8 @@ function Expenses({ t, plazaList, expenseList, onSaveExpense }: { t: typeof dict
         const plaza = plazaList.find((item) => item.id === expense.plazaId);
         const paid = expenseIsPaid(expense) === "paid";
         const source = paid ? expenseWasPaidFromRent(expense) === "rent" ? "Rent collection" : "Outside rent funds" : "Not paid";
-        const hasAttachment = expense.billUrl.startsWith("data:") || expense.billUrl.startsWith("https://") || expense.billUrl.startsWith("http://");
-        return <Card key={expense.id}><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs text-muted">{plaza?.name ?? "Plaza"} · {expense.date}</p><h3 className="mt-1 break-words font-semibold text-ink">{expense.description}</h3><p className="text-sm text-muted">{expense.category} · paid by {expense.paidBy || "—"}</p></div><Badge className={cn("shrink-0 border", paid ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700")}>{paid ? "Paid" : "Unpaid"}</Badge></div><div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3"><div><p className="text-2xl font-semibold tabular-nums text-ink">{formatMoney(expense.amount)}</p><p className="mt-1 text-xs text-muted">{source}{expense.paymentMethod ? ` · ${expense.paymentMethod}` : ""}</p></div>{hasAttachment ? <a href={expense.billUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border px-4 py-2 text-sm font-semibold text-primary hover:bg-primary-soft">View receipt</a> : <span className="text-xs text-muted">No receipt attached</span>}</div></CardContent></Card>;
+        const hasAttachment = isViewableFile(expense.billUrl);
+        return <Card key={expense.id}><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs text-muted">{plaza?.name ?? "Plaza"} · {expense.date}</p><h3 className="mt-1 break-words font-semibold text-ink">{expense.description}</h3><p className="text-sm text-muted">{expense.category} · paid by {expense.paidBy || "—"}</p></div><Badge className={cn("shrink-0 border", paid ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700")}>{paid ? "Paid" : "Unpaid"}</Badge></div><div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3"><div><p className="text-2xl font-semibold tabular-nums text-ink">{formatMoney(expense.amount)}</p><p className="mt-1 text-xs text-muted">{source}{expense.paymentMethod ? ` · ${expense.paymentMethod}` : ""}</p></div>{hasAttachment ? <StoredFileLink value={expense.billUrl} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border px-4 py-2 text-sm font-semibold text-primary hover:bg-primary-soft">View receipt</StoredFileLink> : <span className="text-xs text-muted">No receipt attached</span>}</div></CardContent></Card>;
       })}</div>
       {filteredExpenses.length === 0 ? <Card><CardContent className="p-6 text-center text-sm text-muted">{expenseList.length ? "No expenses match the selected plaza and date filters." : "No individual expense records yet. Use Add expense to record one; summary totals above will update."}</CardContent></Card> : null}
       </section>
@@ -1916,7 +1917,7 @@ function OwnerPaymentForm({
     }
     setSaving(true);
     try {
-      const paymentProofUrl = proof instanceof File && proof.size ? await readFileData(proof) : undefined;
+      const paymentProofUrl = proof instanceof File && proof.size ? await saveFile(proof, "payments") : undefined;
       const selectedAccount = savedAccounts.find((account) => account.id === accountChoice);
       const nextNumber = paymentList.filter((payment) => payment.month.slice(0, 4) === month.slice(0, 4)).length + 1;
       onSave({
@@ -2241,6 +2242,17 @@ export function AccountantApp() {
         setNotificationList(state.notifications);
         setActivityList(state.activityLog);
         setReadyUserId(userId);
+        if (role === "accountant" || role === "admin") {
+          void migrateInlineFiles(state).then((replacements) => {
+            if (!replacements.size) return;
+            const swap = (value: string) => replacements.get(value) ?? value;
+            const swapOptional = (value?: string) => (value === undefined ? value : swap(value));
+            setTenantList((current) => current.map((tenant) => ({ ...tenant, cnicFrontUrl: swapOptional(tenant.cnicFrontUrl), cnicBackUrl: swapOptional(tenant.cnicBackUrl), agreementUrl: swapOptional(tenant.agreementUrl) })));
+            setDocumentList((current) => current.map((document) => ({ ...document, url: swap(document.url) })));
+            setExpenseList((current) => current.map((expense) => ({ ...expense, billUrl: swap(expense.billUrl) })));
+            setOwnerPaymentList((current) => current.map((payment) => ({ ...payment, paymentProofUrl: swapOptional(payment.paymentProofUrl), receiptUrl: swapOptional(payment.receiptUrl) })));
+          });
+        }
       } catch (cause) {
         setSharedDataError(cause instanceof Error ? cause.message : "Data could not be loaded from Supabase.");
       }
@@ -2251,7 +2263,7 @@ export function AccountantApp() {
     return () => {
       window.removeEventListener("kiraya-demo-storage-error", onStorageError);
     };
-  }, [userId]);
+  }, [userId, role]);
   useEffect(() => {
     if (!sharedDataReady) return;
     try {
