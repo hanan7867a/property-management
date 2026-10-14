@@ -166,7 +166,7 @@ function snapshot(rows: Record<Table, Row[]>): TableRows {
 const PAGE = 1000;
 const CHUNK = 400;
 
-async function fetchAll(table: Table): Promise<Raw[]> {
+async function fetchTable(table: Table): Promise<Raw[]> {
   const supabase = createClient();
   const all: Raw[] = [];
   for (let from = 0; ; from += PAGE) {
@@ -177,13 +177,38 @@ async function fetchAll(table: Table): Promise<Raw[]> {
   }
 }
 
+/** Lazy load: fetch only essential tables on startup (plazas, units, tenants). */
+export async function loadRemoteStateEssential(): Promise<{ state: AppState; saved: TableRows } | null> {
+  const essentialTables: Table[] = ["owners", "plazas", "units", "tenants"];
+  const entries = await Promise.all(essentialTables.map(async (table) => [table, await fetchTable(table)] as const));
+  const allData = Object.fromEntries(entries) as Record<Table, Raw[]>;
+  // Fill missing tables with empty arrays
+  const data: Record<Table, Raw[]> = Object.fromEntries(tables.map((table) => [table, allData[table as keyof typeof allData] ?? []])) as Record<Table, Raw[]>;
+  if (essentialTables.every((table) => data[table].length === 0)) return null;
+  const state = fromRows(data);
+  return { state, saved: snapshot(toRows(state)) };
+}
+
+/** Lazy load: fetch a specific table group on demand. */
+export async function loadTableGroup(group: "rent" | "expenses" | "documents" | "activity"): Promise<Record<Table, Raw[]>> {
+  const tablesByGroup: Record<string, Table[]> = {
+    rent: ["rent_entries", "payments"],
+    expenses: ["expenses"],
+    documents: ["documents"],
+    activity: ["notifications", "activity_log"],
+  };
+  const tablesToFetch = tablesByGroup[group] ?? [];
+  const entries = await Promise.all(tablesToFetch.map(async (table) => [table, await fetchTable(table)] as const));
+  const result: Record<Table, Raw[]> = Object.fromEntries(entries.map(([table, data]) => [table, data])) as Record<Table, Raw[]>;
+  return result;
+}
+
 /** Loads the whole app state. Returns null when the database has no data yet. */
 export async function loadRemoteState(): Promise<{ state: AppState; saved: TableRows } | null> {
-  const entries = await Promise.all(tables.map(async (table) => [table, await fetchAll(table)] as const));
+  const entries = await Promise.all(tables.map(async (table) => [table, await fetchTable(table)] as const));
   const data = Object.fromEntries(entries) as Record<Table, Raw[]>;
   if (tables.every((table) => data[table].length === 0)) return null;
   const state = fromRows(data);
-  // Snapshot from the mapped-back state so that later diffs compare like with like.
   return { state, saved: snapshot(toRows(state)) };
 }
 

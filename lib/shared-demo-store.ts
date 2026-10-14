@@ -10,7 +10,7 @@ import type {
   Tenant,
   Unit,
 } from "@/lib/types";
-import { emptySnapshot, loadRemoteState, saveRemoteState, type TableRows } from "@/lib/supabase-state";
+import { emptySnapshot, loadRemoteStateEssential, loadTableGroup, saveRemoteState, type TableRows } from "@/lib/supabase-state";
 
 const storageKey = "kiraya-hisab-state-changed";
 
@@ -62,9 +62,9 @@ function enqueueSave(): Promise<void> {
   return result;
 }
 
-/** Loads the state from Supabase. The database starts empty until data is entered from the app. */
+/** Loads essential state from Supabase (plazas, units, tenants, owners). Other tables load on demand. */
 export async function hydrateSharedDemoState(): Promise<SharedDemoState> {
-  const remote = await loadRemoteState();
+  const remote = await loadRemoteStateEssential();
   if (remote) {
     cache = remote.state;
     saved = remote.saved;
@@ -74,6 +74,22 @@ export async function hydrateSharedDemoState(): Promise<SharedDemoState> {
   }
   hydrated = true;
   return cache;
+}
+
+/** Load additional table groups on demand (rent, expenses, documents, activity). Merges with existing cache. */
+export async function loadTableGroupOnDemand(group: "rent" | "expenses" | "documents" | "activity"): Promise<void> {
+  const newData = await loadTableGroup(group);
+  if (group === "rent") {
+    cache.rentEntries = (newData.rent_entries as RentEntry[]) || [];
+    cache.ownerPayments = (newData.owner_payments as OwnerPayment[]) || [];
+  } else if (group === "expenses") {
+    cache.expenses = (newData.expenses as Expense[]) || [];
+  } else if (group === "documents") {
+    cache.documents = (newData.documents as Document[]) || [];
+  } else if (group === "activity") {
+    cache.notifications = (newData.notifications as AppNotification[]) || [];
+    cache.activityLog = (newData.activity_log as ActivityLogEntry[]) || [];
+  }
 }
 
 export function readSharedDemoState(): SharedDemoState {

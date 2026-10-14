@@ -42,7 +42,7 @@ import { daysBetween, formatMoney, monthLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ActivityLogEntry, AppNotification, Document, Expense, ExpenseCategory, Owner, OwnerPayment, OwnershipConfig, Payment, PaymentMethod, Plaza, RentEntry, Tenant, Unit, User } from "@/lib/types";
 import { OwnerApp } from "@/components/owner-app";
-import { hydrateSharedDemoState, writeSharedDemoState } from "@/lib/shared-demo-store";
+import { hydrateSharedDemoState, loadTableGroupOnDemand, readSharedDemoState, writeSharedDemoState } from "@/lib/shared-demo-store";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { Login } from "@/components/login";
 
@@ -2252,6 +2252,43 @@ export function AccountantApp() {
       window.removeEventListener("kiraya-demo-storage-error", onStorageError);
     };
   }, [userId]);
+  useEffect(() => {
+    if (!sharedDataReady) return;
+    const loadBySection = async () => {
+      try {
+        if (["rent", "arrears", "summary", "owner-payments"].includes(section)) {
+          if (!rentEntryList.length) {
+            await loadTableGroupOnDemand("rent");
+            const state = readSharedDemoState();
+            setRentEntryList(state.rentEntries);
+            setOwnerPaymentList(state.ownerPayments);
+          }
+        } else if (section === "expenses") {
+          if (!expenseList.length) {
+            await loadTableGroupOnDemand("expenses");
+            const state = readSharedDemoState();
+            setExpenseList(state.expenses);
+          }
+        } else if (section === "documents") {
+          if (!documentList.length) {
+            await loadTableGroupOnDemand("documents");
+            const state = readSharedDemoState();
+            setDocumentList(state.documents);
+          }
+        } else if (["activity", "notifications"].includes(section)) {
+          if (!activityList.length) {
+            await loadTableGroupOnDemand("activity");
+            const state = readSharedDemoState();
+            setActivityList(state.activityLog);
+            setNotificationList(state.notifications);
+          }
+        }
+      } catch (err) {
+        setSharedDataError(err instanceof Error ? err.message : "Could not load section data.");
+      }
+    };
+    void loadBySection();
+  }, [section, sharedDataReady, rentEntryList.length, expenseList.length, documentList.length, activityList.length]);
   useEffect(() => {
     if (!sharedDataReady) return;
     try {
