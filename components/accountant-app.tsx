@@ -615,7 +615,7 @@ function Properties({
   return (
     <PageFrame title={t.properties} action={<Button onClick={() => setShowPlazaForm(true)}><Plus className="h-4 w-4" />{t.newPlaza}</Button>}>
       <label className="block max-w-xl text-sm font-medium text-text">
-        Select plaza
+        Plaza Chunein
         <select
           aria-label="Filter plazas"
           value={selectedPlaza?.id ?? ""}
@@ -641,8 +641,8 @@ function Properties({
                   <p className="text-sm text-muted">{plaza.address}</p>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <Button variant="outline" className="min-h-11 w-full" onClick={() => setEditingPlazaId(plaza.id)}>Edit plaza</Button>
-                  <Button className="min-h-11 w-full" onClick={() => onCreateRentSheet(plaza.id)}>Collect rent</Button>
+                  <Button variant="outline" className="min-h-11 w-full" onClick={() => setEditingPlazaId(plaza.id)}>Plaza Tabdeel Karein</Button>
+                  <Button className="min-h-11 w-full" onClick={() => onCreateRentSheet(plaza.id)}>Kiraya Wasool Karein</Button>
                 </div>
                 <div className="grid grid-cols-3 gap-2 rounded-2xl bg-bg p-3 text-sm">
                   <span><strong className="block text-ink">{plaza.floors}</strong>floors</span>
@@ -651,8 +651,8 @@ function Properties({
                 </div>
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <h4 className="text-sm font-semibold text-ink">Tenant grid</h4>
-                    <Badge className="border-primary/20 bg-primary-soft text-primary">{plazaTenants.length} tenants</Badge>
+                    <h4 className="text-sm font-semibold text-ink">Kirayedar</h4>
+                    <Badge className="border-primary/20 bg-primary-soft text-primary">{plazaTenants.length} kirayedar</Badge>
                   </div>
                   <div className="grid max-h-96 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                     {plazaTenants.map(({ unit, tenant }) => {
@@ -975,7 +975,7 @@ function Tenants({
             {tenant.status === "vacated" ? <p className="mt-3 text-xs font-medium text-amber-700">Vacated on {tenant.vacatedAt ?? "date not recorded"} · historical records retained</p> : null}
             <p className="mt-4 text-xs font-medium text-primary">View tenant details</p>
           </button>
-          <div className="mt-4 flex gap-2"><Button variant="outline" size="sm" onClick={() => setEditingTenantId(tenant.id)}>Edit details</Button><Button variant="outline" size="sm" onClick={() => { const number = whatsappNumber(tenant.phone); if (number) window.open(`https://wa.me/${number}`, "_blank", "noopener,noreferrer"); }}>WhatsApp</Button><Button variant="secondary" size="sm" disabled={tenant.status !== "active"} onClick={() => { setVacatingTenantId(tenant.id); setLeavingDate(""); setBalanceConfirmed(false); setBalanceReceivedBy(""); setBalancePaymentMethod("Cash"); }}>Vacate</Button></div>
+          <div className="mt-4 flex gap-2"><Button variant="outline" size="sm" onClick={() => setEditingTenantId(tenant.id)}>Tafseel Tabdeel Karein</Button><Button variant="outline" size="sm" onClick={() => { const number = whatsappNumber(tenant.phone); if (number) window.open(`https://wa.me/${number}`, "_blank", "noopener,noreferrer"); }}>WhatsApp</Button><Button variant="secondary" size="sm" disabled={tenant.status !== "active"} onClick={() => { setVacatingTenantId(tenant.id); setLeavingDate(""); setBalanceConfirmed(false); setBalanceReceivedBy(""); setBalancePaymentMethod("Cash"); }}>Dukan Khali Karein</Button></div>
         </CardContent></Card>;
       })}</div> : <Card><CardContent className="p-6 text-center text-sm text-muted">No tenants found for this plaza.</CardContent></Card>}
       {showForm ? <TenantForm plazaList={plazaList} unitList={unitList} onClose={() => setShowForm(false)} onSave={(values) => { onSaveTenant(values); setShowForm(false); }} /> : null}
@@ -985,7 +985,7 @@ function Tenants({
         <div className="fixed inset-0 z-[70] flex items-end bg-ink/40 p-0 sm:items-center sm:justify-center sm:p-4">
           <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="max-h-[90dvh] w-full overflow-y-auto rounded-t-[28px] border border-border bg-surface p-5 shadow-soft sm:max-w-xl sm:rounded-[24px]">
             <div className="flex items-start justify-between gap-4">
-              <div><p className="text-sm text-muted">Tenant move-out</p><h2 className="mt-1 text-xl font-semibold text-ink">Vacate {vacatingTenant.name}</h2></div>
+              <div><p className="text-sm text-muted">Tenant move-out</p><h2 className="mt-1 text-xl font-semibold text-ink">{vacatingTenant.name} ki Dukan Khali Karein</h2></div>
               <Button variant="outline" size="icon" aria-label="Close vacate form" onClick={closeVacateDialog}><X className="h-4 w-4" /></Button>
             </div>
             <label className="mt-5 block text-sm font-medium text-text">Leaving date<input type="date" required value={leavingDate} onChange={(event) => { setLeavingDate(event.target.value); setBalanceConfirmed(false); }} className="mt-2 h-12 w-full rounded-xl border border-border bg-bg px-3" /></label>
