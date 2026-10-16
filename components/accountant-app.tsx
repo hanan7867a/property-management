@@ -40,13 +40,18 @@ import { dictionaries, type SupportedLanguage } from "@/lib/i18n";
 import { daysBetween, formatMoney, monthLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ActivityLogEntry, AppNotification, Document, Expense, ExpenseCategory, Owner, OwnerPayment, OwnershipConfig, Payment, PaymentMethod, Plaza, RentEntry, Tenant, Unit, User } from "@/lib/types";
-import { OwnerApp } from "@/components/owner-app";
+import dynamic from "next/dynamic";
 import { loadedSharedTables, loadSharedTables, mergeById, readSharedDemoState, startSharedDemoSession, writeSharedDemoState } from "@/lib/shared-demo-store";
 import type { TableName } from "@/lib/supabase-state";
 import { isViewableFile, migrateInlineFiles, saveFile } from "@/lib/storage";
 import { StoredFileLink, StoredImage } from "@/components/stored-file";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { Login } from "@/components/login";
+
+const OwnerApp = dynamic(() => import("@/components/owner-app").then((module) => module.OwnerApp), {
+  ssr: false,
+  loading: () => <main className="grid min-h-dvh place-items-center bg-bg p-4 text-text"><p className="text-sm text-muted">Loading data...</p></main>,
+});
 
 type SectionId =
   | "dashboard"

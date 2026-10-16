@@ -22,20 +22,30 @@ export function useAuth() {
   useEffect(() => {
     const supabase = createClient();
     let latest = 0;
+    let applying: string | null = null;
+    let appliedId: string | null = null;
 
-    async function apply(session: Session | null) {
-      const request = ++latest;
+    async function apply(session: Session | null, event: string) {
       if (!session?.user) {
+        latest++;
+        applying = null;
+        appliedId = null;
         setState(signedOut);
         setLoading(false);
         return;
       }
+      const userId = session.user.id;
+      if (applying === userId || (event === "TOKEN_REFRESHED" && appliedId === userId)) return;
+      const request = ++latest;
+      applying = userId;
       const { data: profile, error } = await supabase
         .from("profiles")
         .select("role, full_name, is_active")
         .eq("id", session.user.id)
         .maybeSingle();
       if (request !== latest) return;
+      applying = null;
+      appliedId = userId;
 
       const role = roles.find((candidate) => candidate === profile?.role) ?? null;
       let message = "";
@@ -56,8 +66,8 @@ export function useAuth() {
     }
 
     // Do not await Supabase calls inside this callback (supabase-js can deadlock); defer instead.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setTimeout(() => void apply(session), 0);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setTimeout(() => void apply(session, event), 0);
     });
     return () => subscription.unsubscribe();
   }, []);

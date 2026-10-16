@@ -5,16 +5,21 @@ import "./globals.css";
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
 });
 
 const naskh = Noto_Naskh_Arabic({
   variable: "--font-naskh",
   subsets: ["arabic"],
+  display: "swap",
+  preload: false,
 });
 
 const nastaliq = Noto_Nastaliq_Urdu({
   variable: "--font-nastaliq",
   subsets: ["arabic"],
+  display: "swap",
+  preload: false,
 });
 
 export const metadata: Metadata = {
