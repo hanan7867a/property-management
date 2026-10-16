@@ -33,7 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { distributeNet, getRotationOwner, lostRent } from "@/lib/accounting";
-import { demoMonth, users } from "@/lib/mock-data";
+import { thisMonth } from "@/lib/month";
 import { createReceiptPdf } from "@/lib/receipt-pdf";
 import { appSettings } from "@/lib/settings";
 import { dictionaries, type SupportedLanguage } from "@/lib/i18n";
@@ -46,6 +46,7 @@ import type { TableName } from "@/lib/supabase-state";
 import { isViewableFile, migrateInlineFiles, saveFile } from "@/lib/storage";
 import { StoredFileLink, StoredImage } from "@/components/stored-file";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { createClient } from "@/utils/supabase/client";
 import { Login } from "@/components/login";
 
 const OwnerApp = dynamic(() => import("@/components/owner-app").then((module) => module.OwnerApp), {
@@ -206,7 +207,7 @@ function TenantDetailPanel({
   const tenant = tenantList.find((item) => item.id === tenantId);
   const unit = tenant ? unitList.find((item) => item.id === tenant.unitId) : undefined;
   const plaza = unit ? plazaList.find((item) => item.id === unit.plazaId) : undefined;
-  const rentEntry = tenant ? rentEntryList.find((entry) => entry.tenantId === tenant.id && entry.month === demoMonth) : undefined;
+  const rentEntry = tenant ? rentEntryList.find((entry) => entry.tenantId === tenant.id && entry.month === thisMonth) : undefined;
   const paid = rentEntry ? activePaymentTotal(rentEntry) : 0;
   const balance = rentEntry ? Math.max(0, rentEntry.dueAmount + rentEntry.carriedForward - paid) : 0;
   const documentsForTenant = tenant ? documentList.filter((document) => document.tenantId === tenant.id) : [];
@@ -300,8 +301,8 @@ function TenantDetailPanel({
 
 
 function Dashboard({ t, plazaList, unitList, rentEntryList, expenseList, ownerPaymentList }: { t: typeof dictionaries.en; plazaList: Plaza[]; unitList: Unit[]; rentEntryList: RentEntry[]; expenseList: Expense[]; ownerPaymentList: OwnerPayment[] }) {
-  const currentMonthEntries = rentEntryList.filter((entry) => entry.month === demoMonth);
-  const recordedPaidExpenses = expenseList.filter((expense) => expense.date.startsWith(demoMonth) && expenseIsPaid(expense) === "paid").reduce((sum, expense) => sum + expense.amount, 0);
+  const currentMonthEntries = rentEntryList.filter((entry) => entry.month === thisMonth);
+  const recordedPaidExpenses = expenseList.filter((expense) => expense.date.startsWith(thisMonth) && expenseIsPaid(expense) === "paid").reduce((sum, expense) => sum + expense.amount, 0);
   const expected = currentMonthEntries.filter((entry) => entry.status !== "vacant").reduce((sum, entry) => sum + entry.dueAmount + entry.carriedForward, 0);
   const collected = currentMonthEntries.reduce((sum, entry) => sum + entry.payments.reduce((inner, payment) => inner + (payment.status === "active" ? payment.amount : 0), 0), 0);
   const netProfit = collected - recordedPaidExpenses;
@@ -313,7 +314,7 @@ function Dashboard({ t, plazaList, unitList, rentEntryList, expenseList, ownerPa
         <CardContent className="grid gap-5 p-5 lg:grid-cols-[1.2fr_.8fr]">
           <div>
             <p className="text-white/70">{t.greeting}</p>
-            <h2 className="mt-2 text-3xl font-semibold">{monthLabel(demoMonth)}</h2>
+            <h2 className="mt-2 text-3xl font-semibold">{monthLabel(thisMonth)}</h2>
             <div className="mt-5 h-3 rounded-full bg-white/15"><div className="h-3 rounded-full bg-accent" style={{ width: `${progress}%` }} /></div>
             <div className="mt-4 grid grid-cols-3 gap-3">
               <div><p className="text-xs text-white/60">{t.expected}</p><p className="font-semibold tabular-nums">{formatMoney(expected)}</p></div>
@@ -329,17 +330,17 @@ function Dashboard({ t, plazaList, unitList, rentEntryList, expenseList, ownerPa
         </CardContent>
       </Card>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <StatCard label={t.totalCollected} value={formatMoney(collected)} chip="+12%" />
+        <StatCard label={t.totalCollected} value={formatMoney(collected)} />
         <StatCard label={t.totalExpenses} value={formatMoney(recordedPaidExpenses)} />
         <StatCard label={t.netProfit} value={formatMoney(netProfit)} />
-        <StatCard label={t.vacantUnits} value={String(unitList.filter((unit) => unit.status === "vacant").length)} chip="red chip" />
+        <StatCard label={t.vacantUnits} value={String(unitList.filter((unit) => unit.status === "vacant").length)} />
         <StatCard label={t.overdueTenants} value={String(overdueCount)} />
         <StatCard label={t.pendingConfirmations} value={String(ownerPaymentList.filter((payment) => payment.status === "sent-awaiting-confirmation").length)} />
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
         {plazaList.map((plaza) => {
           const plazaCollected = currentMonthEntries.filter((entry) => entry.plazaId === plaza.id).reduce((sum, entry) => sum + entry.payments.reduce((inner, payment) => inner + (payment.status === "active" ? payment.amount : 0), 0), 0);
-          const plazaPendingExpenses = expenseList.filter((expense) => expense.plazaId === plaza.id && expense.date.startsWith(demoMonth) && expense.status === "pending-approval").reduce((sum, expense) => sum + expense.amount, 0);
+          const plazaPendingExpenses = expenseList.filter((expense) => expense.plazaId === plaza.id && expense.date.startsWith(thisMonth) && expense.status === "pending-approval").reduce((sum, expense) => sum + expense.amount, 0);
           const calc = { collected: plazaCollected, pendingExpenses: plazaPendingExpenses };
           const plazaUnits = unitList.filter((unit) => unit.plazaId === plaza.id);
           return <Card key={plaza.id}><CardContent className="p-4"><div className="h-24 rounded-2xl" style={{ background: plaza.photoSeed }} /><div className="mt-4 flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink">{plaza.name}</h3><p className="text-sm text-muted">{plaza.address}</p></div><Badge className="border-primary/20 bg-primary-soft text-primary">{plaza.ownership.type}</Badge></div><div className="mt-4 h-2 rounded-full bg-bg"><div className="h-2 rounded-full bg-primary" style={{ width: `${Math.min(100, Math.round((calc.collected / Math.max(calc.collected + 1, calc.collected + calc.pendingExpenses)) * 100))}%` }} /></div><div className="mt-4 grid grid-cols-2 gap-2 text-sm"><span>{formatMoney(calc.collected)}</span><span>{plazaUnits.filter((unit) => unit.status === "vacant").length} vacant</span></div></CardContent></Card>;
@@ -539,7 +540,7 @@ function NewPlazaForm({ ownerList, onAddOwner, onClose, onSave }: {
       ? { type: "single", ownerId, history }
       : ownershipType === "shared"
         ? { type: "shared", shares: [{ ownerId, percent: sharePercent }, { ownerId: partnerId, percent: 100 - sharePercent }], history }
-        : { type: "rotation", rotationOrder: [ownerId, partnerId], rotationStartMonth: demoMonth, history };
+        : { type: "rotation", rotationOrder: [ownerId, partnerId], rotationStartMonth: thisMonth, history };
 
     const photo = data.get("photo");
     if (photo instanceof File && photo.size && !photo.type.startsWith("image/")) {
@@ -686,7 +687,7 @@ function Properties({
                   </div>
                   <div className="grid max-h-96 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                     {plazaTenants.map(({ unit, tenant }) => {
-                      const entry = rentEntryList.find((rentEntry) => rentEntry.tenantId === tenant.id && rentEntry.month === demoMonth);
+                      const entry = rentEntryList.find((rentEntry) => rentEntry.tenantId === tenant.id && rentEntry.month === thisMonth);
                       const paid = entry?.payments.reduce((sum, payment) => sum + payment.amount, 0) ?? 0;
                       const balance = entry ? entry.dueAmount + entry.carriedForward - paid : 0;
                       return (
@@ -707,7 +708,7 @@ function Properties({
                 </div>
                 <div className="rounded-xl border border-border p-3">
                   <div className="flex items-center gap-2 text-sm font-medium text-ink"><Lock className="h-4 w-4" />{t.ownershipLocked}</div>
-                  <p className="mt-2 text-sm text-muted">{plaza.ownership.type === "shared" ? plaza.ownership.shares.map((share) => `${ownerName(ownerList, share.ownerId)} ${share.percent}%`).join(", ") : plaza.ownership.type === "rotation" ? `This month: ${ownerName(ownerList, getRotationOwner(plaza, demoMonth) ?? "")}` : `${ownerName(ownerList, plaza.ownership.ownerId)}`}</p>
+                  <p className="mt-2 text-sm text-muted">{plaza.ownership.type === "shared" ? plaza.ownership.shares.map((share) => `${ownerName(ownerList, share.ownerId)} ${share.percent}%`).join(", ") : plaza.ownership.type === "rotation" ? `This month: ${ownerName(ownerList, getRotationOwner(plaza, thisMonth) ?? "")}` : `${ownerName(ownerList, plaza.ownership.ownerId)}`}</p>
                 </div>
               </CardContent>
             </Card>
@@ -1080,8 +1081,8 @@ function Rent({
   onRecordPayment: (entryId: string, amount: number, method: PaymentMethod, receivedBy: string, reference?: string) => Payment;
 }) {
   const [filter, setFilter] = useState<string>("all");
-  const [selectedPlazaId, setSelectedPlazaId] = useState(initialPlazaId ?? plazaList[0]?.id ?? "plaza-a");
-  const [selectedMonth, setSelectedMonth] = useState(demoMonth);
+  const [selectedPlazaId, setSelectedPlazaId] = useState(initialPlazaId ?? plazaList[0]?.id ?? "");
+  const [selectedMonth, setSelectedMonth] = useState(thisMonth);
   const [tenantSearch, setTenantSearch] = useState("");
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState("");
@@ -1665,7 +1666,7 @@ function Vacancy({
   documentList: Document[];
   onSaveTenant: (values: NewTenantValues) => void;
 }) {
-  const [selectedPlazaId, setSelectedPlazaId] = useState(plazaList[0]?.id ?? "plaza-a");
+  const [selectedPlazaId, setSelectedPlazaId] = useState(plazaList[0]?.id ?? "");
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [relettingUnitId, setRelettingUnitId] = useState<string | null>(null);
   const [historyUnitId, setHistoryUnitId] = useState<string | null>(null);
@@ -1714,7 +1715,7 @@ function Vacancy({
         <StatCard label={t.occupied} value={String(occupiedUnits.length)} />
         <StatCard label={t.vacantUnits} value={String(vacantUnits.length)} />
         <StatCard label={t.soonVacant} value={String(soonVacantUnits.length)} />
-        <StatCard label={t.lostRent} value={formatMoney(vacantUnits.reduce((sum, unit) => sum + lostRent(unit.monthlyRent, 12), 0))} />
+        <StatCard label={t.lostRent} value={formatMoney(vacantUnits.reduce((sum, unit) => sum + lostRent(unit.monthlyRent, unit.vacantSince ? Math.max(0, daysBetween(unit.vacantSince, new Date().toISOString().slice(0, 10))) : 0), 0))} />
       </div>
 
       <Card>
@@ -1866,7 +1867,7 @@ function OwnerPaymentForm({
   const [ownerId, setOwnerId] = useState(initialOwners[0] ?? "");
   const [amountSent, setAmountSent] = useState("");
   const [accountChoice, setAccountChoice] = useState("custom");
-  const [sentByChoice, setSentByChoice] = useState(userList.find((user) => user.role === "accountant")?.id ?? "other");
+  const [sentByChoice, setSentByChoice] = useState(userList[0]?.id ?? "other");
   const [paymentMethod, setPaymentMethod] = useState<NonNullable<OwnerPayment["paymentMethod"]>>("Bank Transfer");
   const [sendingBank, setSendingBank] = useState("");
   const [error, setError] = useState("");
@@ -1888,7 +1889,7 @@ function OwnerPaymentForm({
     for (const date = new Date(first); date <= last; date.setMonth(date.getMonth() + 1)) {
       months.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`);
     }
-    if (!months.includes(demoMonth)) months.push(demoMonth);
+    if (!months.includes(thisMonth)) months.push(thisMonth);
     return Array.from(new Set(months)).sort((a, b) => b.localeCompare(a));
   })();
   const parsedAmountSent = Number(amountSent);
@@ -2165,13 +2166,41 @@ function OwnerPayments({ t, plazaList, ownerPaymentList, ownerList, userList, te
   );
 }
 
-function SupportScreens({ id, t, documentList, activityEntries, notificationEntries, ownerList }: { id: SectionId; t: typeof dictionaries.en; documentList: Document[]; activityEntries: ActivityLogEntry[]; notificationEntries: AppNotification[]; ownerList: Owner[] }) {
+function ChangePassword({ t }: { t: typeof dictionaries.en }) {
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (password.length < 8) {
+      setMessage({ ok: false, text: "Password must be at least 8 characters." });
+      return;
+    }
+    setSaving(true);
+    const { error } = await createClient().auth.updateUser({ password });
+    setSaving(false);
+    if (error) setMessage({ ok: false, text: error.message });
+    else {
+      setPassword("");
+      setMessage({ ok: true, text: "Password changed." });
+    }
+  }
+  return (
+    <form onSubmit={(event) => void submit(event)} className="mt-4 grid gap-2">
+      <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" className="h-11 rounded-xl border border-border bg-bg px-3" placeholder="New password" aria-label="New password" />
+      <Button type="submit" disabled={saving || !password}>{saving ? "Saving…" : t.save}</Button>
+      {message ? <p role="status" className={message.ok ? "text-sm text-emerald-700" : "text-sm text-rose-700"}>{message.text}</p> : null}
+    </form>
+  );
+}
+
+function SupportScreens({ id, t, documentList, activityEntries, notificationEntries, ownerList, plazaList, profile }: { id: SectionId; t: typeof dictionaries.en; documentList: Document[]; activityEntries: ActivityLogEntry[]; notificationEntries: AppNotification[]; ownerList: Owner[]; plazaList: Plaza[]; profile: { id: string; name: string; email: string } }) {
   if (id === "documents") return <PageFrame title={t.documents} action={<Button><Camera className="h-4 w-4" />Upload</Button>}><div className="grid gap-3 lg:grid-cols-3">{documentList.map((doc) => <Card key={doc.id}><CardContent className="p-4"><FileText className="h-5 w-5 text-primary" /><h3 className="mt-3 font-semibold text-ink">{doc.title}</h3><p className="text-sm text-muted">{doc.type} · {doc.uploadedAt}</p>{doc.endDate ? <Badge className="mt-3 border-amber-200 bg-amber-50 text-amber-700">{t.expiringSoon}</Badge> : null}</CardContent></Card>)}</div></PageFrame>;
   if (id === "calculator") return <PageFrame title={t.calculator}><div className="grid gap-4 lg:grid-cols-2"><Card><CardContent className="p-4"><h3 className="font-semibold text-ink">{t.standardCalculator}</h3><div className="mt-4 rounded-xl bg-ink p-4 text-3xl font-semibold text-white">450000*0.4-5000 = {formatMoney(175000)}</div></CardContent></Card><Card><CardContent className="p-4"><h3 className="font-semibold text-ink">{t.shareCalculator}</h3><div className="mt-4 space-y-3">{[{ name: "Ali Raza", amount: 270000 }, { name: "Bilal Ahmed", amount: 180000 }].map((row) => <div key={row.name} className="flex justify-between rounded-xl bg-bg p-3"><span>{row.name}</span><strong>{formatMoney(row.amount)}</strong></div>)}</div><Button className="mt-4" variant="outline">{t.useDashboardFigure}</Button></CardContent></Card></div></PageFrame>;
   if (id === "reports") return <PageFrame title={t.reports} action={<Button variant="outline">{t.exportCsv}</Button>}><div className="grid gap-4 lg:grid-cols-3">{["Income vs expenses", "Vacancy by plaza", "Tenant reliability"].map((label) => <Card key={label}><CardContent className="p-4"><h3 className="font-semibold text-ink">{label}</h3><div className="mt-4 flex h-40 items-end gap-2">{[45, 80, 60, 90, 50, 72].map((height, index) => <span key={index} className="flex-1 rounded-t-lg bg-primary/80" style={{ height: `${height}%` }} />)}</div></CardContent></Card>)}</div></PageFrame>;
-  if (id === "activity") return <PageFrame title={t.activity}><div className="space-y-3">{activityEntries.map((entry) => <Card key={entry.id}><CardContent className="p-4"><p className="font-semibold text-ink">{entry.actorId === "accountant-1" ? "Tariq Mehmood" : ownerList.find((owner) => owner.id === entry.actorId)?.name ?? "User"} {entry.action} {entry.entity}</p><p className="text-sm text-muted">{new Date(entry.timestamp).toLocaleString("en-PK")}</p><pre className="mt-3 overflow-auto rounded-xl bg-bg p-3 text-xs">{JSON.stringify({ before: entry.before, after: entry.after }, null, 2)}</pre></CardContent></Card>)}</div></PageFrame>;
+  if (id === "activity") return <PageFrame title={t.activity}><div className="space-y-3">{activityEntries.map((entry) => <Card key={entry.id}><CardContent className="p-4"><p className="font-semibold text-ink">{entry.actorId === profile.id ? profile.name : ownerList.find((owner) => owner.id === entry.actorId)?.name ?? "User"} {entry.action} {entry.entity}</p><p className="text-sm text-muted">{new Date(entry.timestamp).toLocaleString("en-PK")}</p><pre className="mt-3 overflow-auto rounded-xl bg-bg p-3 text-xs">{JSON.stringify({ before: entry.before, after: entry.after }, null, 2)}</pre></CardContent></Card>)}</div></PageFrame>;
   if (id === "notifications") return <PageFrame title={t.notifications} action={<Button variant="outline">{t.markAllRead}</Button>}><div className="space-y-3">{notificationEntries.map((note) => <Card key={note.id}><CardContent className="flex items-start justify-between gap-3 p-4"><div><h3 className="font-semibold text-ink">{note.title}</h3><p className="text-sm text-muted">{note.body}</p></div>{!note.read ? <span className="mt-1 h-2.5 w-2.5 rounded-full bg-primary" /> : null}</CardContent></Card>)}</div></PageFrame>;
-  return <PageFrame title={t.settings}><div className="grid gap-4 lg:grid-cols-2"><Card><CardContent className="p-4"><h3 className="font-semibold text-ink">Tariq Mehmood</h3><p className="text-sm text-muted">0301-2222222</p><div className="mt-4 grid gap-2"><input className="h-11 rounded-xl border border-border bg-bg px-3" placeholder="New password" /><Button>{t.save}</Button></div></CardContent></Card><Card><CardContent className="p-4"><h3 className="font-semibold text-ink">{t.assignedPermissions}</h3><p className="mt-2 text-sm text-muted">Al-Noor Plaza, Gulshan Arcade, City Heights. Can record rent, expenses, documents and reminders. Ownership and month closing are locked.</p></CardContent></Card></div></PageFrame>;
+  return <PageFrame title={t.settings}><div className="grid gap-4 lg:grid-cols-2"><Card><CardContent className="p-4"><h3 className="font-semibold text-ink">{profile.name}</h3><p className="text-sm text-muted">{profile.email}</p><ChangePassword t={t} /></CardContent></Card><Card><CardContent className="p-4"><h3 className="font-semibold text-ink">{t.assignedPermissions}</h3><p className="mt-2 text-sm text-muted">{plazaList.length ? `${plazaList.map((plaza) => plaza.name).join(", ")}. ` : ""}Can record rent, expenses, documents and reminders. Ownership and month closing are locked.</p></CardContent></Card></div></PageFrame>;
 }
 
 function Arrears({ t, tenantList, unitList, rentEntryList }: { t: typeof dictionaries.en; tenantList: Tenant[]; unitList: Unit[]; rentEntryList: RentEntry[] }) {
@@ -2218,8 +2247,10 @@ function Arrears({ t, tenantList, unitList, rentEntryList }: { t: typeof diction
 }
 
 export function AccountantApp() {
-  const { user, loading, login, logout, role, ownerId, error: authError } = useAuth();
+  const { user, loading, login, logout, role, fullName, ownerId, error: authError } = useAuth();
   const userId = user?.id;
+  const signedInName = fullName || user?.email || "Accountant";
+  const signedInUsers = useMemo<User[]>(() => (userId && role ? [{ id: userId, name: signedInName, role, phone: "" }] : []), [userId, role, signedInName]);
   const [readyUserId, setReadyUserId] = useState<string | null>(null);
   const sharedDataReady = Boolean(userId) && readyUserId === userId;
   const [sharedDataError, setSharedDataError] = useState("");
@@ -2367,14 +2398,14 @@ export function AccountantApp() {
     setPlazaList((current) => current.map((plaza) => plaza.id === plazaId ? { ...plaza, ...values } : plaza));
   }, []);
   const openPlazaRentSheet = useCallback((plazaId: string) => {
-    const missingEntries = missingRentEntriesForMonth(plazaId, demoMonth, unitList, tenantList, rentEntryList);
+    const missingEntries = missingRentEntriesForMonth(plazaId, thisMonth, unitList, tenantList, rentEntryList);
     setRentEntryList((current) => {
       const uniqueEntries = missingEntries.filter((newEntry) => !current.some((entry) =>
         entry.unitId === newEntry.unitId && entry.tenantId === newEntry.tenantId && entry.month === newEntry.month
       ));
       return uniqueEntries.length ? [...current, ...uniqueEntries] : current;
     });
-    const key = `${plazaId}:${demoMonth}`;
+    const key = `${plazaId}:${thisMonth}`;
     setRentSheetKeys((current) => current.includes(key) ? current : [...current, key]);
     setRentInitialPlazaId(plazaId);
     setSection("rent");
@@ -2400,13 +2431,13 @@ export function AccountantApp() {
       agreementEnd: values.agreementEnd,
       status: "active",
     };
-    const entryId = `rent-${unit.id}-${demoMonth}-${tenantId}`;
+    const entryId = `rent-${unit.id}-${thisMonth}-${tenantId}`;
     setTenantList((current) => [...current, createdTenant]);
     setUnitList((current) => current.map((item) => item.id === unit.id
       ? { ...item, status: "occupied", tenantId, monthlyRent: values.rent, vacantSince: undefined }
       : item));
     setRentSheetKeys((current) => {
-      const key = `${unit.plazaId}:${demoMonth}`;
+      const key = `${unit.plazaId}:${thisMonth}`;
       return current.includes(key) ? current : [...current, key];
     });
     setRentEntryList((current) => {
@@ -2415,7 +2446,7 @@ export function AccountantApp() {
         unitId: unit.id,
         tenantId,
         plazaId: unit.plazaId,
-        month: demoMonth,
+        month: thisMonth,
         dueAmount: values.rent,
         status: "unpaid",
         payments: [],
@@ -2568,9 +2599,9 @@ export function AccountantApp() {
     if (section === "vacancy") return <Vacancy t={t} plazaList={plazaList} tenantList={tenantList} unitList={unitList} rentEntryList={rentEntryList} documentList={documentList} onSaveTenant={saveTenant} />;
     if (section === "expenses") return <Expenses t={t} plazaList={plazaList} expenseList={expenseList} onSaveExpense={saveExpense} />;
     if (section === "summary") return <Rent statementOnly t={t} plazaList={plazaList} tenantList={tenantList} unitList={unitList} rentEntryList={rentEntryList} expenseList={expenseList} ownerPaymentList={ownerPaymentList} ownerList={ownerList} rentSheetKeys={rentSheetKeys} initialPlazaId={rentInitialPlazaId} onRentSheetKeysChange={setRentSheetKeys} onRentEntriesChange={setRentEntryList} onRecordPayment={recordPayment} />;
-    if (section === "owner-payments") return <OwnerPayments t={t} plazaList={plazaList} ownerPaymentList={ownerPaymentList} ownerList={ownerList} userList={users} tenantList={tenantList} unitList={unitList} rentEntryList={rentEntryList} expenseList={expenseList} onSave={saveOwnerPayment} />;
-    return <SupportScreens id={section} t={t} documentList={documentList} activityEntries={activityList} notificationEntries={notificationList} ownerList={ownerList} />;
-  }, [section, sectionReady, sharedDataError, t, searchTerm, ownerList, plazaList, tenantList, unitList, rentEntryList, expenseList, ownerPaymentList, rentSheetKeys, rentInitialPlazaId, documentList, activityList, notificationList, savePlaza, addOwner, updatePlaza, openPlazaRentSheet, saveTenant, updateTenant, saveExpense, saveOwnerPayment, vacateTenant, recordPayment]);
+    if (section === "owner-payments") return <OwnerPayments t={t} plazaList={plazaList} ownerPaymentList={ownerPaymentList} ownerList={ownerList} userList={signedInUsers} tenantList={tenantList} unitList={unitList} rentEntryList={rentEntryList} expenseList={expenseList} onSave={saveOwnerPayment} />;
+    return <SupportScreens id={section} t={t} documentList={documentList} activityEntries={activityList} notificationEntries={notificationList} ownerList={ownerList} plazaList={plazaList} profile={{ id: userId ?? "", name: signedInName, email: user?.email ?? "" }} />;
+  }, [section, sectionReady, sharedDataError, signedInName, signedInUsers, user?.email, userId, t, searchTerm, ownerList, plazaList, tenantList, unitList, rentEntryList, expenseList, ownerPaymentList, rentSheetKeys, rentInitialPlazaId, documentList, activityList, notificationList, savePlaza, addOwner, updatePlaza, openPlazaRentSheet, saveTenant, updateTenant, saveExpense, saveOwnerPayment, vacateTenant, recordPayment]);
 
   if (loading) {
     return (
@@ -2655,7 +2686,7 @@ export function AccountantApp() {
         </header>
         <main className="mx-auto max-w-[1440px] px-3 pb-28 pt-4 sm:px-5 lg:pb-8">
           {sharedDataError ? <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{sharedDataError}</div> : null}
-          {appSettings.closedMonths.includes(demoMonth) ? <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><Lock className="me-2 inline h-4 w-4" />{t.closedMonth}</div> : null}
+          {appSettings.closedMonths.includes(thisMonth) ? <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><Lock className="me-2 inline h-4 w-4" />{t.closedMonth}</div> : null}
           {body}
         </main>
       </div>
