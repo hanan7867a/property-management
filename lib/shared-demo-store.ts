@@ -63,12 +63,14 @@ function enqueueSave(): Promise<void> {
 }
 
 let loaded = new Set<TableName>();
+const inflight = new Map<TableName, Promise<void>>();
 
 /** Starts an empty session. Nothing is downloaded here; each screen asks for the tables it needs. */
 export function startSharedDemoSession(): void {
   cache = emptySharedDemoState;
   saved = emptySnapshot();
   loaded = new Set();
+  inflight.clear();
   hydrated = true;
 }
 
@@ -82,10 +84,7 @@ export function mergeById<T extends { id: string }>(incoming: T[], current: T[])
 }
 
 /** Loads the tables that are not loaded yet and merges them into the in-memory state (local rows win). */
-export async function loadSharedTables(names: TableName[], scope?: LoadScope): Promise<SharedDemoState> {
-  if (!hydrated) throw new Error("The app data session has not started yet.");
-  const pending = names.filter((name) => !loaded.has(name));
-  if (!pending.length) return cache;
+async function loadAndMerge(pending: TableName[], scope?: LoadScope): Promise<void> {
   const result = await loadTables(pending, scope);
   const wants = (name: TableName) => pending.includes(name);
   const incoming = result.state;
@@ -105,6 +104,22 @@ export async function loadSharedTables(names: TableName[], scope?: LoadScope): P
     saved[table] = new Map([...rows, ...(saved[table] ?? [])]);
   }
   for (const name of pending) loaded.add(name);
+}
+
+/** Loads the tables that are not loaded yet and merges them into the in-memory state (local rows win). Concurrent requests for the same table share one download. */
+export async function loadSharedTables(names: TableName[], scope?: LoadScope): Promise<SharedDemoState> {
+  if (!hydrated) throw new Error("The app data session has not started yet.");
+  const pending = names.filter((name) => !loaded.has(name));
+  const waiting = pending.filter((name) => inflight.has(name)).map((name) => inflight.get(name) as Promise<void>);
+  const toLoad = pending.filter((name) => !inflight.has(name));
+  if (toLoad.length) {
+    const request = loadAndMerge(toLoad, scope);
+    const release = () => toLoad.forEach((name) => inflight.delete(name));
+    request.then(release, release);
+    toLoad.forEach((name) => inflight.set(name, request));
+    waiting.push(request);
+  }
+  await Promise.all(waiting);
   return cache;
 }
 

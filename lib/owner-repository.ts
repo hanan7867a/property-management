@@ -121,10 +121,10 @@ function appendOwnerEvent(
 export async function loadOwnerData(ownerId: string): Promise<void> {
   await loadSharedTables(["owners", "plazas"]);
   const plazaIds = readSharedDemoState().plazas.filter((plaza) => ownerCanViewPlaza(plaza, ownerId)).map((plaza) => plaza.id);
-  await loadSharedTables(["units", "rent_entries", "expenses", "owner_payments", "documents", "notifications", "activity_log"], { plazaIds, ownerId });
+  await loadSharedTables(["units", "rent_entries", "expenses", "owner_payments", "documents", "notifications", "activity_log"], { plazaIds, ownerId, lean: true });
   const plazaIdSet = new Set(plazaIds);
   const unitIds = readSharedDemoState().units.filter((unit) => plazaIdSet.has(unit.plazaId)).map((unit) => unit.id);
-  await loadSharedTables(["tenants"], { unitIds });
+  await loadSharedTables(["tenants"], { unitIds, lean: true });
 }
 
 export function createOwnerRepositories(ownerId: string) {

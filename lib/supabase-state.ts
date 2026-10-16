@@ -167,7 +167,9 @@ const PAGE = 1000;
 const CHUNK = 400;
 
 export type TableName = Table;
-export type LoadScope = { plazaIds?: string[]; unitIds?: string[]; ownerId?: string };
+export type LoadScope = { plazaIds?: string[]; unitIds?: string[]; ownerId?: string; lean?: boolean };
+
+const LEAN_TENANT_COLUMNS = "id,name,phone,unit_id,monthly_rent,advance,tenancy_period_months,note,agreement_start,agreement_end,rent_increase,status,vacated_at";
 
 const IN_CHUNK = 100;
 const plazaScoped: Table[] = ["units", "rent_entries", "expenses", "owner_payments", "activity_log"];
@@ -176,22 +178,25 @@ const plazaOrGlobal: Table[] = ["documents", "notifications"];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type QueryBuilder = any;
 
-async function fetchPaged(table: Table, apply: (query: QueryBuilder) => QueryBuilder = (query) => query): Promise<Raw[]> {
+async function fetchPaged(table: Table, apply: (query: QueryBuilder) => QueryBuilder = (query) => query, columns = "*"): Promise<Raw[]> {
   const supabase = createClient();
   const all: Raw[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await apply(supabase.from(table).select("*")).order("id").range(from, from + PAGE - 1);
+    const { data, error } = await apply(supabase.from(table).select(columns)).order("id").range(from, from + PAGE - 1);
     if (error) throw new Error(`Could not read ${table} from Supabase: ${error.message}`);
     all.push(...(data ?? []));
     if (!data || data.length < PAGE) return all;
   }
 }
 
-async function fetchInChunks(table: Table, column: string, ids: string[]): Promise<Raw[]> {
+async function fetchInChunks(table: Table, column: string, ids: string[], lean = false): Promise<Raw[]> {
   const rows: Raw[] = [];
   for (let i = 0; i < ids.length; i += IN_CHUNK) {
     const chunk = ids.slice(i, i + IN_CHUNK);
-    rows.push(...(await fetchPaged(table, (query) => query.in(column, chunk))));
+    rows.push(...(await fetchPaged(table, (query) => {
+      const filtered = query.in(column, chunk);
+      return lean && table === "documents" ? filtered.neq("type", "CNIC") : filtered;
+    }, lean && table === "tenants" ? LEAN_TENANT_COLUMNS : "*")));
   }
   return rows;
 }
@@ -203,11 +208,14 @@ async function fetchTable(table: Table, scope?: LoadScope): Promise<Raw[]> {
     return table === "owner_payments" && scope?.ownerId ? rows.filter((row) => row.owner_id === scope.ownerId) : rows;
   }
   if (plazaIds && plazaOrGlobal.includes(table)) {
-    const rows = await fetchInChunks(table, "plaza_id", plazaIds);
-    const global = await fetchPaged(table, (query) => query.is("plaza_id", null));
+    const rows = await fetchInChunks(table, "plaza_id", plazaIds, scope?.lean);
+    const global = await fetchPaged(table, (query) => {
+      const filtered = query.is("plaza_id", null);
+      return scope?.lean && table === "documents" ? filtered.neq("type", "CNIC") : filtered;
+    });
     return [...rows, ...global];
   }
-  if (table === "tenants" && scope?.unitIds) return fetchInChunks("tenants", "unit_id", scope.unitIds);
+  if (table === "tenants" && scope?.unitIds) return fetchInChunks("tenants", "unit_id", scope.unitIds, scope.lean);
   return fetchPaged(table);
 }
 
