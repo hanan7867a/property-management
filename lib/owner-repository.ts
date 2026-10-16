@@ -21,7 +21,6 @@ export type PlazaMonthSummary = {
   plaza_expenses: number;
   partner_expenses: number;
   pending_expenses: number;
-  accountant_pay: number;
   net_profit: number;
 };
 
@@ -147,12 +146,7 @@ export function createOwnerRepositories(ownerId: string) {
     const directOwnerExpenses = approved
       .filter((expense) => expense.chargeTo !== "plaza" && expense.chargeTo.ownerId === ownerId)
       .reduce((sum, expense) => sum + expense.amount, 0);
-    const accountantPay = collected > 0
-      ? appSettings.accountantTerms.type === "fixed"
-        ? appSettings.accountantTerms.amount
-        : Math.round(collected * appSettings.accountantTerms.amount / 100)
-      : 0;
-    const beforeOwnerDeduction = Math.max(0, collected - plazaExpenses - accountantPay);
+    const beforeOwnerDeduction = Math.max(0, collected - plazaExpenses);
     const share = accountOwnerShare(plaza, ownerId, month, beforeOwnerDeduction);
     const due = Math.max(0, share - directOwnerExpenses);
     const payments = state.ownerPayments.filter((payment) =>
@@ -305,9 +299,6 @@ export function createOwnerRepositories(ownerId: string) {
         const directExpenses = approved
           .filter((expense) => expense.chargeTo !== "plaza" && expense.chargeTo.ownerId === ownerId)
           .reduce((sum, expense) => sum + expense.amount, 0);
-        const accountantPay = collected > 0
-          ? appSettings.accountantTerms.type === "fixed" ? appSettings.accountantTerms.amount : Math.round(collected * appSettings.accountantTerms.amount / 100)
-          : 0;
         return {
           expected_rent: rows.reduce((sum, entry) => sum + entry.dueAmount + entry.carriedForward, 0),
           collected,
@@ -315,8 +306,7 @@ export function createOwnerRepositories(ownerId: string) {
           plaza_expenses: plazaExpenses,
           partner_expenses: directExpenses,
           pending_expenses: expenses.filter((expense) => expense.status === "pending-approval").reduce((sum, expense) => sum + expense.amount, 0),
-          accountant_pay: accountantPay,
-          net_profit: Math.max(0, collected - plazaExpenses - accountantPay),
+          net_profit: Math.max(0, collected - plazaExpenses),
         };
       },
     },

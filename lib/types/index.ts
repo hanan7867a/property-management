@@ -180,7 +180,6 @@ export type ActivityLogEntry = {
 
 export type AppSettings = {
   approvalLimit: Money;
-  accountantTerms: { type: "fixed" | "percentage"; amount: Money };
   reminderTemplates: Record<"en" | "ur", string>;
   closedMonths: string[];
 };
